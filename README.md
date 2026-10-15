@@ -4,6 +4,8 @@ An AI-powered Playwright + SpecFlow test authoring and execution studio built wi
 
 The harness decouples **AI Agent Exploration & Authoring** from **Automated Test Execution**, enabling teams to author, inspect, and maintain reliable Playwright end-to-end tests using natural language while executing tests at native speed without LLM timeout risks.
 
+![Browser Testing Harness Studio Preview](docs/images/studio-preview.png)
+
 ---
 
 ## Architecture Overview
@@ -85,6 +87,8 @@ browser-testing-harness/
 │   ├── Hooks/                           # SpecFlow before/after scenario hooks
 │   ├── specflow.json                    # SpecFlow runtime configuration
 │   └── sequential.runsettings           # Runsettings for sequential execution
+├── docs/                                # Documentation assets
+│   └── images/                          # Studio preview screenshots
 └── README.md
 ```
 
