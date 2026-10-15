@@ -140,6 +140,18 @@
                             <i class="bi bi-stars"></i> Gemini Active
                         </span>
                     }
+                    @if (_currentMcpOverride.IsRemote)
+                    {
+                        <span class="badge bg-info bg-opacity-25 text-info border border-info border-opacity-25" style="font-size: 0.7rem;" title="Remote MCP: @_currentMcpOverride.ServerUrl">
+                            <i class="bi bi-hdd-network"></i> Remote MCP
+                        </span>
+                    }
+                    else
+                    {
+                        <span class="badge bg-secondary bg-opacity-25 text-secondary border border-secondary border-opacity-25" style="font-size: 0.7rem;" title="Local MCP: npx @@playwright/mcp">
+                            <i class="bi bi-terminal"></i> Local MCP
+                        </span>
+                    }
                 </div>
                 <div class="d-flex align-items-center gap-2">
                     <button class="btn btn-xs btn-outline-secondary border-0 text-secondary"
@@ -463,7 +475,7 @@
                 <div class="modal-header border-secondary border-opacity-50">
                     <h5 class="modal-title d-flex align-items-center gap-2">
                         <i class="bi bi-sliders text-primary"></i>
-                        AI Provider Settings (@_selectedProviderKey)
+                        AI & MCP Settings (@_selectedProviderKey)
                     </h5>
                     <button type="button" class="btn-close btn-close-white" @onclick="ToggleSettingsModal"></button>
                 </div>
@@ -519,6 +531,31 @@
                                placeholder="Paste your Gemini or OpenAI API key here..."
                                @bind="_currentProviderOverride.ApiKey" />
                     </div>
+                    <div class="border-top border-secondary border-opacity-25 pt-2">
+                        <div class="d-flex align-items-center justify-content-between mb-1">
+                            <label class="form-label small fw-semibold text-secondary mb-0">
+                                <i class="bi bi-hdd-network me-1 text-info"></i>Playwright MCP Server Endpoint (Optional)
+                            </label>
+                            @if (!string.IsNullOrWhiteSpace(_playwrightServerUrl))
+                            {
+                                <span class="badge bg-info bg-opacity-25 text-info border border-info border-opacity-25" style="font-size: 0.7rem;">
+                                    Remote SSE
+                                </span>
+                            }
+                            else
+                            {
+                                <span class="badge bg-secondary bg-opacity-25 text-secondary border border-secondary border-opacity-25" style="font-size: 0.7rem;">
+                                    Local Process (npx)
+                                </span>
+                            }
+                        </div>
+                        <input type="text" class="form-control bg-dark text-light border-secondary border-opacity-50"
+                               placeholder="e.g. http://localhost:8931/sse (leave blank for local npx)"
+                               @bind="_playwrightServerUrl" />
+                        <div class="form-text text-secondary" style="font-size: 0.75rem;">
+                            Leave empty to launch a local browser window via <kbd class="bg-secondary bg-opacity-25 text-light">npx @@playwright/mcp</kbd>. Specify an HTTP/SSE URL to connect to an external or containerized Playwright MCP server.
+                        </div>
+                    </div>
                     <div class="alert alert-secondary bg-dark border-secondary border-opacity-50 text-secondary mb-0 p-2" style="font-size: 0.8rem;">
                         <i class="bi bi-info-circle me-1"></i>
                         Extended LLM HTTP timeout is set to <strong>@_config.LlmTimeoutMinutes minutes</strong> to comfortably handle slow local LLM accessibility analysis.
@@ -556,6 +593,8 @@
     private HarnessConfig _config = new();
     private string _selectedProviderKey = "GoogleGemini";
     private LlmProviderConfig _currentProviderOverride = new();
+    private PlaywrightMcpConfig _currentMcpOverride = new();
+    private string _playwrightServerUrl = "";
     private VisualExecutionMode _selectedVisualMode = VisualExecutionMode.HeadedSlowMo;
     private string _targetScope = "all";
     private bool _runInParallel = false;
@@ -608,6 +647,8 @@
         _config = ConfigOptions.Value;
         _selectedProviderKey = string.IsNullOrEmpty(_config.ActiveProvider) ? "GoogleGemini" : _config.ActiveProvider;
         LoadCurrentProviderOverride();
+        _currentMcpOverride = _config.PlaywrightMcp.Clone();
+        _playwrightServerUrl = _currentMcpOverride.ServerUrl ?? "";
 
         AgentService.OnStatusUpdate += HandleAgentStatusUpdate;
         AgentService.OnAgentMessageChunk += HandleAgentMessageChunk;
@@ -747,11 +788,26 @@
     private void ToggleSettingsModal()
     {
         _showSettingsModal = !_showSettingsModal;
+        if (_showSettingsModal)
+        {
+            _playwrightServerUrl = _currentMcpOverride.ServerUrl ?? "";
+        }
     }
 
-    private void SaveProviderSettings()
+    private async Task SaveProviderSettings()
     {
         _config.Providers[_selectedProviderKey] = _currentProviderOverride.Clone();
+        var normalizedUrl = string.IsNullOrWhiteSpace(_playwrightServerUrl) ? null : _playwrightServerUrl.Trim();
+        var urlChanged = !string.Equals(_currentMcpOverride.ServerUrl, normalizedUrl, StringComparison.OrdinalIgnoreCase);
+
+        _currentMcpOverride.ServerUrl = normalizedUrl;
+        _config.PlaywrightMcp.ServerUrl = normalizedUrl;
+
+        if (urlChanged)
+        {
+            await AgentService.DisconnectMcpAsync();
+        }
+
         _showSettingsModal = false;
         _statusText = $"Updated settings for {_selectedProviderKey}.";
     }
@@ -799,7 +855,7 @@
         try
         {
             _ = ScrollChatToBottomAsync();
-            await AgentService.ExecutePromptAsync(prompt, _selectedProviderKey, _currentProviderOverride, _agentCts.Token);
+            await AgentService.ExecutePromptAsync(prompt, _selectedProviderKey, _currentProviderOverride, _currentMcpOverride, _agentCts.Token);
             await RefreshTestFiles();
         }
         catch (OperationCanceledException)

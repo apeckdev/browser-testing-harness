@@ -32,11 +32,13 @@ public interface IMcpAgentService : IAsyncDisposable
 
     IReadOnlyList<ChatMessage> ConversationHistory { get; }
     Task ResetConversationAsync();
+    Task DisconnectMcpAsync();
 
     Task<string> ExecutePromptAsync(
         string userPrompt,
         string? providerKey = null,
         LlmProviderConfig? customOverride = null,
+        PlaywrightMcpConfig? playwrightMcpOverride = null,
         CancellationToken cancellationToken = default);
 
     Task<List<TestFileInfo>> GetExistingTestFilesAsync();
@@ -52,6 +54,7 @@ public class McpAgentService : IMcpAgentService
     private readonly SemaphoreSlim _connectionLock = new(1, 1);
 
     private McpClient? _mcpClient;
+    private string? _activeConnectionEndpoint;
     private readonly List<ChatMessage> _conversationHistory = new();
 
     public event Action<string>? OnStatusUpdate;
@@ -132,9 +135,9 @@ CORE OPERATIONAL RULES:
         return path;
     }
 
-    private string[] GetNormalizedMcpArguments()
+    private string[] GetNormalizedMcpArguments(PlaywrightMcpConfig mcpConfig)
     {
-        var rawArgs = _config.PlaywrightMcp.Arguments;
+        var rawArgs = mcpConfig.Arguments;
         if (rawArgs == null || rawArgs.Count == 0)
         {
             return new[] { "-y", "@playwright/mcp@latest", "--browser", "chromium", "--timeout-action", "60000" };
@@ -184,9 +187,36 @@ CORE OPERATIONAL RULES:
         return normalized.ToArray();
     }
 
-    private async Task EnsureMcpClientConnectedAsync(CancellationToken cancellationToken)
+    public async Task DisconnectMcpAsync()
     {
-        if (_mcpClient != null)
+        await _connectionLock.WaitAsync();
+        try
+        {
+            if (_mcpClient != null)
+            {
+                await _mcpClient.DisposeAsync();
+                _mcpClient = null;
+                _activeConnectionEndpoint = null;
+                OnStatusUpdate?.Invoke("Playwright MCP server disconnected.");
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Error disconnecting Playwright MCP client.");
+        }
+        finally
+        {
+            _connectionLock.Release();
+        }
+    }
+
+    private async Task EnsureMcpClientConnectedAsync(PlaywrightMcpConfig mcpConfig, CancellationToken cancellationToken)
+    {
+        var targetEndpoint = !string.IsNullOrWhiteSpace(mcpConfig.ServerUrl)
+            ? mcpConfig.ServerUrl.Trim()
+            : "stdio";
+
+        if (_mcpClient != null && string.Equals(_activeConnectionEndpoint, targetEndpoint, StringComparison.OrdinalIgnoreCase))
         {
             return;
         }
@@ -194,46 +224,83 @@ CORE OPERATIONAL RULES:
         await _connectionLock.WaitAsync(cancellationToken);
         try
         {
-            if (_mcpClient != null)
+            if (_mcpClient != null && string.Equals(_activeConnectionEndpoint, targetEndpoint, StringComparison.OrdinalIgnoreCase))
             {
                 return;
             }
 
-            OnStatusUpdate?.Invoke("Connecting to Playwright MCP server...");
-
-            var env = new Dictionary<string, string?>(StringComparer.OrdinalIgnoreCase)
+            if (_mcpClient != null)
             {
-                ["PLAYWRIGHT_MCP_PING_TIMEOUT_MS"] = "0"
-            };
-
-            var command = _config.PlaywrightMcp.Command;
-            if (OperatingSystem.IsWindows() && string.Equals(command, "npx", StringComparison.OrdinalIgnoreCase))
-            {
-                var npxPath = Environment.GetEnvironmentVariable("PATH")?
-                    .Split(';')
-                    .Select(p => Path.Combine(p.Trim(), "npx.cmd"))
-                    .FirstOrDefault(File.Exists);
-
-                if (!string.IsNullOrEmpty(npxPath))
+                try
                 {
-                    command = npxPath;
+                    await _mcpClient.DisposeAsync();
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogWarning(ex, "Error disposing previous McpClient.");
+                }
+                finally
+                {
+                    _mcpClient = null;
+                    _activeConnectionEndpoint = null;
                 }
             }
 
-            var normalizedArgs = GetNormalizedMcpArguments();
-            _logger.LogInformation("Launching Playwright MCP server with {Command} {Args}", command, string.Join(" ", normalizedArgs));
-
-            var transportOptions = new StdioClientTransportOptions
+            if (!string.IsNullOrWhiteSpace(mcpConfig.ServerUrl))
             {
-                Command = command,
-                Arguments = normalizedArgs,
-                EnvironmentVariables = env
-            };
+                var remoteUrl = mcpConfig.ServerUrl.Trim();
+                OnStatusUpdate?.Invoke($"Connecting to remote Playwright MCP server at {remoteUrl}...");
+                _logger.LogInformation("Connecting to remote Playwright MCP server at {Url}", remoteUrl);
 
-            var transport = new StdioClientTransport(transportOptions);
-            _mcpClient = await McpClient.CreateAsync(transport, cancellationToken: cancellationToken);
+                var transportOptions = new HttpClientTransportOptions
+                {
+                    Endpoint = new Uri(remoteUrl)
+                };
+                var transport = new HttpClientTransport(transportOptions);
+                _mcpClient = await McpClient.CreateAsync(transport, cancellationToken: cancellationToken);
+                _activeConnectionEndpoint = targetEndpoint;
 
-            OnStatusUpdate?.Invoke("Playwright MCP server connected (headed Chromium browser ready).");
+                OnStatusUpdate?.Invoke($"Playwright MCP server connected (remote SSE at {remoteUrl}).");
+            }
+            else
+            {
+                OnStatusUpdate?.Invoke("Connecting to Playwright MCP server...");
+
+                var env = new Dictionary<string, string?>(StringComparer.OrdinalIgnoreCase)
+                {
+                    ["PLAYWRIGHT_MCP_PING_TIMEOUT_MS"] = "0"
+                };
+
+                var command = mcpConfig.Command;
+                if (OperatingSystem.IsWindows() && string.Equals(command, "npx", StringComparison.OrdinalIgnoreCase))
+                {
+                    var npxPath = Environment.GetEnvironmentVariable("PATH")?
+                        .Split(';')
+                        .Select(p => Path.Combine(p.Trim(), "npx.cmd"))
+                        .FirstOrDefault(File.Exists);
+
+                    if (!string.IsNullOrEmpty(npxPath))
+                    {
+                        command = npxPath;
+                    }
+                }
+
+                var normalizedArgs = GetNormalizedMcpArguments(mcpConfig);
+                _logger.LogInformation("Launching Playwright MCP server with {Command} {Args}", command, string.Join(" ", normalizedArgs));
+
+                var transportOptions = new StdioClientTransportOptions
+                {
+                    Command = command,
+                    Arguments = normalizedArgs,
+                    EnvironmentVariables = env
+                };
+
+                var transport = new StdioClientTransport(transportOptions);
+                _mcpClient = await McpClient.CreateAsync(transport, cancellationToken: cancellationToken);
+                _activeConnectionEndpoint = targetEndpoint;
+
+                OnStatusUpdate?.Invoke("Playwright MCP server connected (headed Chromium browser ready).");
+            }
         }
         catch (Exception ex)
         {
@@ -475,9 +542,11 @@ CORE OPERATIONAL RULES:
         string userPrompt,
         string? providerKey = null,
         LlmProviderConfig? customOverride = null,
+        PlaywrightMcpConfig? playwrightMcpOverride = null,
         CancellationToken cancellationToken = default)
     {
-        await EnsureMcpClientConnectedAsync(cancellationToken);
+        var mcpConfig = playwrightMcpOverride ?? _config.PlaywrightMcp;
+        await EnsureMcpClientConnectedAsync(mcpConfig, cancellationToken);
 
         var activeProviderName = providerKey ?? _config.ActiveProvider;
         OnStatusUpdate?.Invoke($"Preparing tools and querying {activeProviderName}...");

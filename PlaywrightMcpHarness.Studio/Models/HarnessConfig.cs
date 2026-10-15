@@ -51,8 +51,21 @@ public class LlmProviderConfig
 
 public class PlaywrightMcpConfig
 {
+    public string? ServerUrl { get; set; }
     public string Command { get; set; } = "npx";
     public List<string> Arguments { get; set; } = new();
+
+    public bool IsRemote => !string.IsNullOrWhiteSpace(ServerUrl);
+
+    public PlaywrightMcpConfig Clone()
+    {
+        return new PlaywrightMcpConfig
+        {
+            ServerUrl = this.ServerUrl,
+            Command = this.Command,
+            Arguments = new List<string>(this.Arguments)
+        };
+    }
 }
 
 public enum VisualExecutionMode
