@@ -1,0 +1,126 @@
+using System;
+using System.IO;
+using System.Text.RegularExpressions;
+using System.Threading.Tasks;
+using BoDi;
+using Microsoft.Playwright;
+using TechTalk.SpecFlow;
+
+namespace PlaywrightMcpHarness.Tests.Hooks;
+
+[Binding]
+public class PlaywrightHooks
+{
+    private readonly IObjectContainer _container;
+    private readonly ScenarioContext _scenarioContext;
+    private IPlaywright? _playwright;
+    private IBrowser? _browser;
+    private IBrowserContext? _context;
+    private IPage? _page;
+
+    public PlaywrightHooks(IObjectContainer container, ScenarioContext scenarioContext)
+    {
+        _container = container;
+        _scenarioContext = scenarioContext;
+    }
+
+    [BeforeScenario]
+    public async Task BeforeScenarioAsync()
+    {
+        _playwright = await Playwright.CreateAsync();
+
+        var headedEnv = Environment.GetEnvironmentVariable("HEADED");
+        var pwDebugEnv = Environment.GetEnvironmentVariable("PWDEBUG");
+        bool isHeaded = headedEnv == "1" || pwDebugEnv == "1";
+
+        float slowMo = 0;
+        var slowMoEnv = Environment.GetEnvironmentVariable("SLOWMO");
+        if (!string.IsNullOrEmpty(slowMoEnv) && float.TryParse(slowMoEnv, out var parsedSlowMo))
+        {
+            slowMo = parsedSlowMo;
+        }
+
+        Console.WriteLine($"[HOOK_LOG] isHeaded={isHeaded} (HEADED='{headedEnv}'), slowMo={slowMo} (SLOWMO='{slowMoEnv}')");
+
+        _browser = await _playwright.Chromium.LaunchAsync(new BrowserTypeLaunchOptions
+        {
+            Headless = !isHeaded,
+            SlowMo = slowMo,
+            Args = isHeaded ? new[] { "--start-maximized", "--no-sandbox" } : null
+        });
+
+        _context = await _browser.NewContextAsync(new BrowserNewContextOptions
+        {
+            ViewportSize = isHeaded ? ViewportSize.NoViewport : new ViewportSize { Width = 1280, Height = 720 }
+        });
+
+        await _context.Tracing.StartAsync(new TracingStartOptions
+        {
+            Screenshots = true,
+            Snapshots = true,
+            Sources = true
+        });
+
+        _page = await _context.NewPageAsync();
+        if (isHeaded)
+        {
+            await _page.BringToFrontAsync();
+        }
+        _container.RegisterInstanceAs<IPage>(_page);
+    }
+
+    [AfterScenario]
+    public async Task AfterScenarioAsync()
+    {
+        try
+        {
+            if (_context != null)
+            {
+                var scenarioTitle = _scenarioContext.ScenarioInfo.Title ?? "scenario";
+                var sanitizedTitle = Regex.Replace(scenarioTitle, @"[^a-zA-Z0-9_\-]", "_");
+                var tracesDir = Path.Combine(Directory.GetCurrentDirectory(), "traces");
+                if (!Directory.Exists(tracesDir))
+                {
+                    Directory.CreateDirectory(tracesDir);
+                }
+
+                var tracePath = Path.Combine(tracesDir, $"{sanitizedTitle}.zip");
+                await _context.Tracing.StopAsync(new TracingStopOptions
+                {
+                    Path = tracePath
+                });
+            }
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"[PlaywrightHooks] Error saving trace: {ex.Message}");
+        }
+        finally
+        {
+            var headedEnv = Environment.GetEnvironmentVariable("HEADED");
+            var slowMoEnv = Environment.GetEnvironmentVariable("SLOWMO");
+            if (headedEnv == "1" && !string.IsNullOrEmpty(slowMoEnv) && float.TryParse(slowMoEnv, out var sm) && sm > 0)
+            {
+                // Brief pause so the user can clearly observe the finished scenario on screen
+                await Task.Delay(1200);
+            }
+
+            if (_page != null)
+            {
+                await _page.CloseAsync();
+            }
+
+            if (_context != null)
+            {
+                await _context.CloseAsync();
+            }
+
+            if (_browser != null)
+            {
+                await _browser.CloseAsync();
+            }
+
+            _playwright?.Dispose();
+        }
+    }
+}

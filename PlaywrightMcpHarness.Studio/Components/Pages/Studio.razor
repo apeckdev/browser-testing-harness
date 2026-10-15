@@ -1,0 +1,1221 @@
+@page "/"
+@page "/studio"
+@rendermode InteractiveServer
+@implements IDisposable
+@inject IMcpAgentService AgentService
+@inject ITestRunnerService TestRunner
+@inject IOptions<HarnessConfig> ConfigOptions
+@inject IJSRuntime JS
+
+<PageTitle>Browser Testing Harness</PageTitle>
+
+<div class="d-flex flex-column h-100 w-100 bg-dark text-light overflow-hidden" style="height: 100vh; max-height: 100vh;">
+    <!-- Top Navigation & Control Bar -->
+    <header class="navbar navbar-dark border-bottom border-secondary border-opacity-25 px-3 py-1 flex-shrink-0 d-flex align-items-center justify-content-between" style="height: 48px; min-height: 48px; max-height: 48px; background-color: #121316; flex-wrap: nowrap; overflow-x: auto; overflow-y: hidden;">
+        <div class="d-flex align-items-center gap-2 flex-shrink-0">
+            <span class="fs-6 fw-bold d-flex align-items-center gap-2 text-white text-nowrap">
+                <i class="bi bi-browser-chrome text-primary"></i>
+                Browser Testing Harness
+            </span>
+            <span class="badge @StatusBadgeClass d-flex align-items-center gap-2 py-1 px-2 border border-secondary border-opacity-25 shadow-sm text-nowrap">
+                @if (_isAgentBusy || _isTestRunning)
+                {
+                    <span class="spinner-grow spinner-grow-sm text-light" role="status" style="width: 0.65rem; height: 0.65rem;"></span>
+                }
+                else
+                {
+                    <span class="badge-dot bg-success rounded-circle" style="width: 7px; height: 7px;"></span>
+                }
+                <span class="text-truncate" style="max-width: 180px;">@_statusText</span>
+            </span>
+        </div>
+
+        <div class="ms-auto d-flex align-items-center gap-2 flex-nowrap flex-shrink-0">
+            <!-- AI Provider Selector -->
+            <div class="input-group input-group-sm" style="width: 140px;">
+                <span class="input-group-text bg-dark text-secondary border-secondary border-opacity-50 px-2">
+                    <i class="bi bi-cpu"></i>
+                </span>
+                <select class="form-select bg-dark text-light border-secondary border-opacity-50 py-1"
+                        @bind="_selectedProviderKey"
+                        @bind:after="OnProviderChanged">
+                    @foreach (var p in _config.Providers.Keys)
+                    {
+                        <option value="@p">@p</option>
+                    }
+                </select>
+            </div>
+
+            <!-- Quick Inline API Key Input (No environment variables or paths needed!) -->
+            @if (_currentProviderOverride.Type.Equals("Gemini", StringComparison.OrdinalIgnoreCase) ||
+                 _currentProviderOverride.Type.Equals("OpenAI", StringComparison.OrdinalIgnoreCase) ||
+                 _currentProviderOverride.Type.Equals("OpenWebUI", StringComparison.OrdinalIgnoreCase))
+            {
+                <div class="input-group input-group-sm" style="width: 155px;">
+                    <span class="input-group-text bg-dark border-secondary border-opacity-50 px-2 @(string.IsNullOrWhiteSpace(_currentProviderOverride.ApiKey) ? "text-warning" : "text-success")"
+                          title="@GetApiKeyTitle()">
+                        <i class="bi bi-key-fill"></i>
+                    </span>
+                    <input type="password"
+                           class="form-control bg-dark text-light border-secondary border-opacity-50 py-1"
+                           placeholder="@GetApiKeyPlaceholder()"
+                           @bind="_currentProviderOverride.ApiKey"
+                           @bind:after="OnQuickApiKeyChanged" />
+                </div>
+            }
+
+            <!-- AI Settings Toggle Button -->
+            <button class="btn btn-sm btn-outline-secondary border-opacity-50 text-nowrap py-1 px-2"
+                    title="Configure AI Endpoint, Model ID, and API Key"
+                    @onclick="ToggleSettingsModal">
+                <i class="bi bi-gear-fill"></i> Settings
+            </button>
+
+            <!-- Visual Execution Mode Selector -->
+            <div class="input-group input-group-sm" style="width: 210px;">
+                <span class="input-group-text bg-dark text-secondary border-secondary border-opacity-50 px-2">
+                    <i class="bi bi-eye"></i>
+                </span>
+                <select class="form-select bg-dark text-light border-secondary border-opacity-50 py-1" @bind="_selectedVisualMode">
+                    <option value="@VisualExecutionMode.HeadedSlowMo">Visible Browser (Slow 1s)</option>
+                    <option value="@VisualExecutionMode.HeadedNormal">Visible Browser (Full)</option>
+                    <option value="@VisualExecutionMode.Headless">Headless (Background)</option>
+                    <option value="@VisualExecutionMode.Inspector">Playwright Inspector</option>
+                </select>
+            </div>
+
+            <!-- Target Scope: All Features vs Selected Feature -->
+            <div class="input-group input-group-sm" style="width: 155px;">
+                <span class="input-group-text bg-dark text-secondary border-secondary border-opacity-50 px-2" title="Test Execution Scope">
+                    <i class="bi bi-bullseye"></i>
+                </span>
+                <select class="form-select bg-dark text-light border-secondary border-opacity-50 py-1" @bind="_targetScope">
+                    <option value="all">All Features</option>
+                    <option value="selected">Selected File</option>
+                </select>
+            </div>
+
+            <!-- Parallel vs Sequential Switch -->
+            <div class="form-check form-switch d-flex align-items-center gap-1 text-light small px-2 py-1 border border-secondary border-opacity-25 rounded bg-dark"
+                 title="@(_runInParallel ? "Parallel: Tests run concurrently across multiple browser windows" : "Sequential: Tests run one at a time in a single browser window")"
+                 style="height: 31px;">
+                <input class="form-check-input ms-0 me-1 mt-0" type="checkbox" role="switch" id="parallelSwitch" @bind="_runInParallel" />
+                <label class="form-check-label text-nowrap user-select-none" for="parallelSwitch" style="font-size: 0.72rem; cursor: pointer;">
+                    @(_runInParallel ? "Parallel" : "Sequential")
+                </label>
+            </div>
+
+            <!-- Run Tests Button -->
+            @if (_isTestRunning)
+            {
+                <button class="btn btn-sm btn-danger d-flex align-items-center gap-1 shadow-sm text-nowrap py-1" @onclick="CancelTestRun">
+                    <span class="spinner-border spinner-border-sm" role="status"></span>
+                    Stop Tests
+                </button>
+            }
+            else
+            {
+                <button class="btn btn-sm btn-success d-flex align-items-center gap-1 shadow-sm text-nowrap py-1 px-3"
+                        @onclick="RunSpecFlowTests"
+                        disabled="@(_isAgentBusy)">
+                    <i class="bi bi-play-fill fs-6"></i>
+                    Run Tests
+                </button>
+            }
+        </div>
+    </header>
+
+    <!-- Main Workspace Two-Column Split: takes 100% of remaining height -->
+    <div class="d-flex flex-grow-1" style="flex: 1 1 0px; min-height: 0; overflow: hidden;">
+        <!-- Left Pane: AI Exploration Agent & Chat Log -->
+        <div class="d-flex flex-column border-end border-secondary border-opacity-25" style="width: 44%; min-width: 320px; min-height: 0; height: 100%; overflow: hidden; background-color: #16181d;">
+            <!-- Left Pane Header -->
+            <div class="d-flex align-items-center justify-content-between px-3 py-1 border-bottom border-secondary border-opacity-25 flex-shrink-0" style="height: 38px; min-height: 38px; background-color: #1b1e24;">
+                <div class="d-flex align-items-center gap-2">
+                    <i class="bi bi-chat-left-dots-fill text-info"></i>
+                    <span class="fw-semibold small text-light">AI Authoring Agent</span>
+                    @if (_currentProviderOverride.Type.Equals("Gemini", StringComparison.OrdinalIgnoreCase))
+                    {
+                        <span class="badge bg-primary bg-opacity-25 text-primary border border-primary border-opacity-25" style="font-size: 0.7rem;">
+                            <i class="bi bi-stars"></i> Gemini Active
+                        </span>
+                    }
+                </div>
+                <div class="d-flex align-items-center gap-2">
+                    <button class="btn btn-xs btn-outline-secondary border-0 text-secondary"
+                            title="Reset Agent Conversation"
+                            @onclick="ResetAgentConversation"
+                            disabled="@_isAgentBusy">
+                        <i class="bi bi-arrow-counterclockwise"></i> Reset
+                    </button>
+                </div>
+            </div>
+
+            <!-- Chat Messages History: flex: 1 1 0px; min-height: 0; overflow-y: auto -->
+            <div id="chatScrollArea" class="p-3 d-flex flex-column gap-3" style="flex: 1 1 0px; min-height: 0; overflow-y: auto; overflow-x: hidden; font-size: 0.9rem; scroll-behavior: smooth;">
+                @foreach (var msg in AgentService.ConversationHistory.Where(m => m.Role != ChatRole.System))
+                {
+                    <div class="d-flex flex-column @(msg.Role == ChatRole.User ? "align-items-end" : "align-items-start") w-100">
+                        <div class="d-flex align-items-center gap-2 mb-1 px-1">
+                            @if (msg.Role == ChatRole.User)
+                            {
+                                <span class="badge bg-primary bg-opacity-75 text-light" style="font-size: 0.72rem;">User</span>
+                            }
+                            else
+                            {
+                                <span class="badge bg-secondary text-light" style="font-size: 0.72rem;">
+                                    <i class="bi bi-cpu me-1"></i>Agent (@_selectedProviderKey)
+                                </span>
+                            }
+                        </div>
+                        <div class="p-3 rounded-3 shadow-sm border border-secondary border-opacity-25"
+                             style="max-width: 92%; word-break: break-word; overflow-wrap: anywhere; font-family: 'Inter', sans-serif; @(msg.Role == ChatRole.User ? "background-color: #273043; color: #f1f5f9;" : "background-color: #1e222b; color: #e2e8f0;")">
+                            <div style="white-space: pre-wrap; font-family: inherit;">@msg.Text</div>
+                        </div>
+                    </div>
+                }
+
+                @if (_isAgentBusy && !string.IsNullOrEmpty(_streamingChunk))
+                {
+                    <div class="d-flex flex-column align-items-start w-100">
+                        <div class="d-flex align-items-center gap-2 mb-1 px-1">
+                            <span class="badge bg-info text-dark" style="font-size: 0.72rem;">
+                                <span class="spinner-border spinner-border-sm me-1" style="width: 0.7rem; height: 0.7rem;"></span>
+                                Agent Generating...
+                            </span>
+                        </div>
+                        <div class="p-3 rounded-3 shadow-sm border border-info border-opacity-50"
+                             style="max-width: 92%; word-break: break-word; overflow-wrap: anywhere; font-family: 'Inter', sans-serif; background-color: #1b2432; color: #e0f2fe;">
+                            <div style="white-space: pre-wrap; font-family: inherit;">@_streamingChunk<span class="cursor-blink">|</span></div>
+                        </div>
+                    </div>
+                }
+            </div>
+
+            <!-- Agent Prompt Input Box -->
+            <div class="p-2 px-3 border-top border-secondary border-opacity-25 flex-shrink-0" style="background-color: #1b1e24;">
+                <div class="input-group">
+                    <textarea class="form-control bg-dark text-light border-secondary border-opacity-50 shadow-none"
+                              rows="2"
+                              placeholder="Describe your test scenario... (e.g., 'Navigate to https://lost-letter.com/, explore the navigation links, and generate Navigation.feature and NavigationSteps.cs.')"
+                              @bind="_promptInput"
+                              @bind:event="oninput"
+                              @onkeydown="HandleKeyDown"
+                              disabled="@_isAgentBusy"></textarea>
+                </div>
+                <div class="d-flex justify-content-between align-items-center mt-2">
+                    <small class="text-secondary" style="font-size: 0.75rem;">
+                        <kbd class="bg-secondary bg-opacity-25 text-light">Ctrl+Enter</kbd> to submit
+                    </small>
+                    <div class="d-flex gap-2">
+                        @if (_isAgentBusy)
+                        {
+                            <button class="btn btn-sm btn-danger px-3 d-flex align-items-center gap-1 shadow-sm" @onclick="CancelAgent">
+                                <i class="bi bi-x-circle-fill"></i> Cancel
+                            </button>
+                        }
+                        else
+                        {
+                            <button class="btn btn-sm btn-primary px-3 d-flex align-items-center gap-1 shadow-sm"
+                                    @onclick="SendPromptToAgent"
+                                    disabled="@(string.IsNullOrWhiteSpace(_promptInput))">
+                                <i class="bi bi-send-fill"></i> Send
+                            </button>
+                        }
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Right Pane: Code Editor & Live Test Runner Console -->
+        <div class="d-flex flex-column flex-grow-1" style="flex: 1 1 0px; min-height: 0; height: 100%; overflow: hidden; background-color: #131418;">
+            <!-- Top Half: File Viewer & Tweaker (flex: 1 1 0px; min-height: 0; overflow: hidden;) -->
+            <div class="d-flex flex-column @(_isEditorFullScreen ? "editor-fullscreen-card" : "border-bottom border-secondary border-opacity-25")"
+                 style="@(_isEditorFullScreen ? "" : "flex: 1 1 0px; min-height: 0; overflow: hidden;")">
+                <!-- Code Editor Toolbar -->
+                <div class="d-flex align-items-center justify-content-between px-3 py-1 border-bottom border-secondary border-opacity-25 flex-shrink-0 gap-2" style="height: 38px; min-height: 38px; background-color: #1a1c22; flex-wrap: nowrap; overflow-x: auto; overflow-y: hidden;">
+                    <div class="d-flex align-items-center gap-2 flex-shrink-0">
+                        <i class="bi bi-file-earmark-code text-warning"></i>
+                        <span class="fw-semibold small text-light text-nowrap">Workspace Files</span>
+                        <div class="input-group input-group-sm" style="width: 230px;">
+                            <select class="form-select bg-dark text-light border-secondary border-opacity-50 py-0"
+                                    @bind="_selectedFilePath"
+                                    @bind:after="OnFileSelected">
+                                @if (_testFiles.Count == 0)
+                                {
+                                    <option value="">(No test files found)</option>
+                                }
+                                else
+                                {
+                                    @foreach (var f in _testFiles)
+                                    {
+                                        <option value="@f.RelativePath">[@f.FileType] @f.FileName</option>
+                                    }
+                                }
+                            </select>
+                        </div>
+                        <button class="btn btn-xs btn-outline-secondary border-opacity-50 text-nowrap"
+                                title="Refresh files list from disk"
+                                @onclick="() => RefreshTestFiles()">
+                            <i class="bi bi-arrow-repeat"></i> Refresh
+                        </button>
+                    </div>
+
+                    <div class="d-flex align-items-center gap-2 flex-shrink-0">
+                        @if (!string.IsNullOrEmpty(_selectedFilePath))
+                        {
+                            <button class="btn btn-sm btn-outline-success d-flex align-items-center gap-1 py-0 px-2"
+                                    title="Save changes to this file"
+                                    @onclick="SaveCurrentFileEdits"
+                                    disabled="@(_isAgentBusy || _isTestRunning)">
+                                <i class="bi bi-floppy"></i> Save Edits
+                            </button>
+
+                            @if (_showDeleteConfirm)
+                            {
+                                <div class="d-flex align-items-center gap-1 bg-danger bg-opacity-10 border border-danger border-opacity-25 rounded px-2 py-0">
+                                    <span class="text-danger small" style="font-size: 0.75rem;">Delete file?</span>
+                                    <button class="btn btn-sm btn-danger py-0 px-2" style="font-size: 0.75rem;"
+                                            @onclick="ConfirmDeleteCurrentFile"
+                                            disabled="@(_isAgentBusy || _isTestRunning)">
+                                        Confirm
+                                    </button>
+                                    <button class="btn btn-sm btn-outline-secondary py-0 px-1" style="font-size: 0.75rem;"
+                                            @onclick="() => _showDeleteConfirm = false">
+                                        Cancel
+                                    </button>
+                                </div>
+                            }
+                            else
+                            {
+                                <button class="btn btn-sm btn-outline-danger d-flex align-items-center gap-1 py-0 px-2"
+                                        title="Delete this file from the test suite"
+                                        @onclick="() => _showDeleteConfirm = true"
+                                        disabled="@(_isAgentBusy || _isTestRunning)">
+                                    <i class="bi bi-trash"></i> Delete
+                                </button>
+                            }
+
+                            <!-- Full Screen Toggle Button -->
+                            <button class="btn btn-sm btn-outline-secondary d-flex align-items-center gap-1 py-0 px-2"
+                                    title="@(_isEditorFullScreen ? "Exit Full Screen (Esc)" : "Expand Editor to Full Screen")"
+                                    @onclick="ToggleEditorFullScreen">
+                                <i class="bi @(_isEditorFullScreen ? "bi-fullscreen-exit text-warning" : "bi-arrows-fullscreen")"></i>
+                                <span class="d-none d-sm-inline" style="font-size: 0.75rem;">@(_isEditorFullScreen ? "Exit Full Screen" : "Full Screen")</span>
+                            </button>
+                        }
+                    </div>
+                </div>
+
+                <!-- Code Editor Area: flex: 1 1 0px; min-height: 0; overflow: hidden; -->
+                <div class="p-0 bg-dark d-flex" style="flex: 1 1 0px; min-height: 0; height: calc(100% - 38px); overflow: hidden;">
+                    <textarea id="studioCodeTextarea"
+                              class="form-control bg-dark text-light border-0 shadow-none h-100 w-100"
+                              style="font-family: 'JetBrains Mono', Consolas, monospace; font-size: 0.88rem; line-height: 1.5; resize: none; tab-size: 4; overflow: auto;"
+                              placeholder="// Select a .feature or *Steps.cs file above to view and tweak code..."
+                              @bind="_currentFileContent"
+                              spellcheck="false"></textarea>
+                </div>
+            </div>
+
+            <!-- Bottom Half: Test Runner Console Output & Detailed Results (flex: 1.2 1 0px; min-height: 0; overflow: hidden;) -->
+            <div class="d-flex flex-column" style="flex: 1.2 1 0px; min-height: 0; overflow: hidden; background-color: #0d0f12;">
+                <!-- Console Toolbar -->
+                <div class="d-flex align-items-center justify-content-between px-3 py-1 border-bottom border-secondary border-opacity-25 flex-shrink-0" style="height: 38px; min-height: 38px; background-color: #14171d;">
+                    <div class="d-flex align-items-center gap-2">
+                        <i class="bi bi-terminal-fill text-success" style="font-size: 0.85rem;"></i>
+                        <span class="fw-semibold small text-light" style="font-size: 0.82rem;">Test Runner & Results</span>
+                        @if (_isTestRunning)
+                        {
+                            <span class="badge bg-success bg-opacity-75 text-light" style="font-size: 0.7rem;">
+                                <span class="spinner-border spinner-border-sm me-1" style="width: 0.6rem; height: 0.6rem;"></span>Running
+                            </span>
+                        }
+                    </div>
+
+                    <!-- Live Summary Badges -->
+                    <div class="d-flex align-items-center gap-2">
+                        <span class="badge bg-secondary bg-opacity-50 text-light border border-secondary border-opacity-25" style="font-size: 0.72rem;">
+                            Total: @_testScenarios.Count
+                        </span>
+                        <span class="badge bg-success bg-opacity-25 text-success border border-success border-opacity-25" style="font-size: 0.72rem;">
+                            Passed: @_testScenarios.Count(s => s.Passed)
+                        </span>
+                        @if (_testScenarios.Any(s => !s.Passed))
+                        {
+                            <span class="badge bg-danger bg-opacity-25 text-danger border border-danger border-opacity-25" style="font-size: 0.72rem;">
+                                Failed: @_testScenarios.Count(s => !s.Passed)
+                            </span>
+                        }
+                    </div>
+
+                    <!-- View Switcher & Actions -->
+                    <div class="d-flex align-items-center gap-2">
+                        @if (HasTestFailures)
+                        {
+                            <button class="btn btn-xs btn-danger d-flex align-items-center gap-1 shadow-sm px-2 text-nowrap"
+                                    title="Send test failure logs and scenario details to AI Agent to diagnose and fix"
+                                    @onclick="SendFailureToAgent"
+                                    disabled="@(_isAgentBusy || _isTestRunning)">
+                                <i class="bi bi-bug-fill"></i> Fix with Agent
+                            </button>
+                        }
+
+                        <div class="btn-group btn-group-xs" role="group">
+                            <button type="button" class="btn btn-xs @(_activeConsoleTab == "terminal" ? "btn-secondary text-light fw-semibold" : "btn-outline-secondary text-secondary")"
+                                    @onclick='() => _activeConsoleTab = "terminal"'>
+                                <i class="bi bi-terminal me-1"></i>Detailed Log
+                            </button>
+                            <button type="button" class="btn btn-xs @(_activeConsoleTab == "scenarios" ? "btn-secondary text-light fw-semibold" : "btn-outline-secondary text-secondary")"
+                                    @onclick='() => _activeConsoleTab = "scenarios"'>
+                                <i class="bi bi-check2-circle me-1"></i>Scenarios (@_testScenarios.Count)
+                            </button>
+                        </div>
+                        <button class="btn btn-xs btn-outline-secondary border-0 text-secondary"
+                                title="Clear console output"
+                                @onclick="ClearConsole">
+                            <i class="bi bi-trash3"></i> Clear
+                        </button>
+                    </div>
+                </div>
+
+                <!-- Tab 1: Live Terminal Log: flex: 1 1 0px; min-height: 0; overflow-y: auto; overflow-x: auto; -->
+                @if (_activeConsoleTab == "terminal")
+                {
+                    <div id="consoleScrollArea" class="p-3" style="flex: 1 1 0px; min-height: 0; overflow-y: auto; overflow-x: auto; font-family: 'JetBrains Mono', Consolas, monospace; font-size: 0.82rem; line-height: 1.45; color: #a6adbb;">
+                        @if (_testConsoleOutput.Count == 0)
+                        {
+                            <div class="text-secondary fst-italic">No test output yet. Click 'Run Tests' to execute in the chosen visual mode.</div>
+                        }
+                        else
+                        {
+                            @foreach (var line in _testConsoleOutput)
+                            {
+                                <div class="@GetConsoleLineClass(line)" style="white-space: pre-wrap; word-break: break-all; margin-bottom: 2px;">@line</div>
+                            }
+                        }
+                    </div>
+                }
+                else
+                {
+                    <!-- Tab 2: Scenarios Detailed Breakdown: flex: 1 1 0px; min-height: 0; overflow-y: auto; -->
+                    <div class="p-3" style="flex: 1 1 0px; min-height: 0; overflow-y: auto;">
+                        @if (_testScenarios.Count == 0)
+                        {
+                            <div class="text-secondary fst-italic">No scenarios recorded yet. Click 'Run Tests' to execute and view scenario results.</div>
+                        }
+                        else
+                        {
+                            <div class="d-flex flex-column gap-2">
+                                @foreach (var sc in _testScenarios)
+                                {
+                                    <div class="p-2 px-3 rounded-2 border @(sc.Passed ? "border-success border-opacity-25 bg-success bg-opacity-10" : "border-danger border-opacity-50 bg-danger bg-opacity-10") d-flex align-items-center justify-content-between">
+                                        <div class="d-flex align-items-center gap-2">
+                                            @if (sc.Passed)
+                                            {
+                                                <i class="bi bi-check-circle-fill text-success fs-6"></i>
+                                            }
+                                            else
+                                            {
+                                                <i class="bi bi-x-circle-fill text-danger fs-6"></i>
+                                            }
+                                            <span class="fw-semibold text-light small">@sc.Name</span>
+                                            @if (!string.IsNullOrEmpty(sc.ErrorMessage))
+                                            {
+                                                <span class="text-danger small ms-2">(@sc.ErrorMessage)</span>
+                                            }
+                                        </div>
+                                        <div class="d-flex align-items-center gap-2">
+                                            @if (!sc.Passed)
+                                            {
+                                                <button class="btn btn-xs btn-outline-danger d-flex align-items-center gap-1 py-0 px-2"
+                                                        title="Send this scenario failure to AI Agent to diagnose and fix"
+                                                        @onclick="() => SendScenarioFailureToAgent(sc)"
+                                                        disabled="@(_isAgentBusy || _isTestRunning)">
+                                                    <i class="bi bi-robot"></i> Fix with Agent
+                                                </button>
+                                            }
+                                            @if (!string.IsNullOrEmpty(sc.Duration))
+                                            {
+                                                <span class="badge bg-dark text-secondary border border-secondary border-opacity-25" style="font-size: 0.72rem;">@sc.Duration</span>
+                                            }
+                                            <span class="badge @(sc.Passed ? "bg-success" : "bg-danger") text-light" style="font-size: 0.72rem;">
+                                                @(sc.Passed ? "Passed" : "Failed")
+                                            </span>
+                                        </div>
+                                    </div>
+                                }
+                            </div>
+                        }
+                    </div>
+                }
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Modal: AI Provider Settings -->
+@if (_showSettingsModal)
+{
+    <div class="modal fade show d-block" tabindex="-1" style="background-color: rgba(0,0,0,0.65); z-index: 1050;">
+        <div class="modal-dialog modal-dialog-centered">
+            <div class="modal-content bg-dark text-light border border-secondary shadow-lg">
+                <div class="modal-header border-secondary border-opacity-50">
+                    <h5 class="modal-title d-flex align-items-center gap-2">
+                        <i class="bi bi-sliders text-primary"></i>
+                        AI Provider Settings (@_selectedProviderKey)
+                    </h5>
+                    <button type="button" class="btn-close btn-close-white" @onclick="ToggleSettingsModal"></button>
+                </div>
+                <div class="modal-body d-flex flex-column gap-3">
+                    <div>
+                        <label class="form-label small fw-semibold text-secondary">Provider Type</label>
+                        <select class="form-select bg-dark text-light border-secondary border-opacity-50"
+                                @bind="_currentProviderOverride.Type"
+                                @bind:after="OnTypeChangedInModal">
+                            <option value="Gemini">Google Gemini</option>
+                            <option value="OpenWebUI">Open WebUI</option>
+                            <option value="Ollama">Ollama (Local)</option>
+                            <option value="OpenAI">OpenAI / LM Studio / Compatible</option>
+                        </select>
+                    </div>
+
+                    @if (_currentProviderOverride.Type.Equals("Gemini", StringComparison.OrdinalIgnoreCase))
+                    {
+                        <div class="d-flex gap-2 flex-wrap">
+                            <span class="small text-secondary align-self-center">Model Presets:</span>
+                            <button type="button" class="btn btn-xs btn-outline-info" @onclick='() => SetModelPreset("gemini-2.5-flash")'>gemini-2.5-flash</button>
+                            <button type="button" class="btn btn-xs btn-outline-info" @onclick='() => SetModelPreset("gemini-2.5-pro")'>gemini-2.5-pro</button>
+                            <button type="button" class="btn btn-xs btn-outline-info" @onclick='() => SetModelPreset("gemini-1.5-flash")'>gemini-1.5-flash</button>
+                        </div>
+                    }
+
+                    @if (_currentProviderOverride.Type.Equals("OpenWebUI", StringComparison.OrdinalIgnoreCase))
+                    {
+                        <div class="d-flex gap-2 flex-wrap">
+                            <span class="small text-secondary align-self-center">Model Presets:</span>
+                            <button type="button" class="btn btn-xs btn-outline-info" @onclick='() => SetModelPreset("llama3:latest")'>llama3:latest</button>
+                            <button type="button" class="btn btn-xs btn-outline-info" @onclick='() => SetModelPreset("llama3.2:latest")'>llama3.2:latest</button>
+                            <button type="button" class="btn btn-xs btn-outline-info" @onclick='() => SetModelPreset("qwen2.5-coder:14b")'>qwen2.5-coder:14b</button>
+                            <button type="button" class="btn btn-xs btn-outline-info" @onclick='() => SetModelPreset("mistral:latest")'>mistral:latest</button>
+                        </div>
+                    }
+
+                    <div>
+                        <label class="form-label small fw-semibold text-secondary">Endpoint URL</label>
+                        <input type="text" class="form-control bg-dark text-light border-secondary border-opacity-50"
+                               placeholder="e.g. https://generativelanguage.googleapis.com/v1beta/openai/ or http://localhost:11434"
+                               @bind="_currentProviderOverride.Endpoint" />
+                    </div>
+                    <div>
+                        <label class="form-label small fw-semibold text-secondary">Model ID</label>
+                        <input type="text" class="form-control bg-dark text-light border-secondary border-opacity-50"
+                               placeholder="e.g. gemini-2.5-flash, qwen2.5-coder:14b, gpt-4o, etc."
+                               @bind="_currentProviderOverride.ModelId" />
+                    </div>
+                    <div>
+                        <label class="form-label small fw-semibold text-secondary">API Key (paste directly or use ENV:VAR_NAME)</label>
+                        <input type="password" class="form-control bg-dark text-light border-secondary border-opacity-50"
+                               placeholder="Paste your Gemini or OpenAI API key here..."
+                               @bind="_currentProviderOverride.ApiKey" />
+                    </div>
+                    <div class="alert alert-secondary bg-dark border-secondary border-opacity-50 text-secondary mb-0 p-2" style="font-size: 0.8rem;">
+                        <i class="bi bi-info-circle me-1"></i>
+                        Extended LLM HTTP timeout is set to <strong>@_config.LlmTimeoutMinutes minutes</strong> to comfortably handle slow local LLM accessibility analysis.
+                    </div>
+                </div>
+                <div class="modal-footer border-secondary border-opacity-50">
+                    <button type="button" class="btn btn-sm btn-secondary" @onclick="ToggleSettingsModal">Close</button>
+                    <button type="button" class="btn btn-sm btn-primary" @onclick="SaveProviderSettings">Save Settings</button>
+                </div>
+            </div>
+        </div>
+    </div>
+}
+
+<style>
+    .cursor-blink {
+        display: inline-block;
+        animation: blink 1s infinite;
+        font-weight: bold;
+        color: #38bdf8;
+    }
+
+    @@keyframes blink {
+        0%, 100% { opacity: 1; }
+        50% { opacity: 0; }
+    }
+
+    .btn-xs {
+        padding: 0.15rem 0.45rem;
+        font-size: 0.75rem;
+    }
+</style>
+
+@code {
+    private HarnessConfig _config = new();
+    private string _selectedProviderKey = "GoogleGemini";
+    private LlmProviderConfig _currentProviderOverride = new();
+    private VisualExecutionMode _selectedVisualMode = VisualExecutionMode.HeadedSlowMo;
+    private string _targetScope = "all";
+    private bool _runInParallel = false;
+
+    private string _statusText = "Ready";
+    private bool _isAgentBusy;
+    private bool _isTestRunning;
+    private string _promptInput = "";
+    private string _streamingChunk = "";
+    private CancellationTokenSource? _agentCts;
+    private CancellationTokenSource? _testCts;
+
+    private List<TestFileInfo> _testFiles = new();
+    private string _selectedFilePath = "";
+    private string _currentFileContent = "";
+
+    private readonly List<string> _testConsoleOutput = new();
+    private string _activeConsoleTab = "terminal";
+    private readonly List<ScenarioResult> _testScenarios = new();
+    private bool _showSettingsModal;
+    private bool _showDeleteConfirm;
+    private bool _isEditorFullScreen;
+    private int _lastTestExitCode;
+    private DotNetObjectReference<Studio>? _dotNetRef;
+
+    private bool HasTestFailures =>
+        _testScenarios.Any(s => !s.Passed) ||
+        _lastTestExitCode != 0 ||
+        _testConsoleOutput.Any(l => l.Contains("Failed!", StringComparison.OrdinalIgnoreCase) ||
+                                    l.Contains("Failed ", StringComparison.OrdinalIgnoreCase) ||
+                                    l.Contains("Error Message:", StringComparison.OrdinalIgnoreCase) ||
+                                    l.Contains("Test Run Failed", StringComparison.OrdinalIgnoreCase));
+
+    public class ScenarioResult
+    {
+        public string Name { get; set; } = "";
+        public bool Passed { get; set; }
+        public string Duration { get; set; } = "";
+        public string ErrorMessage { get; set; } = "";
+    }
+
+    private string StatusBadgeClass => _statusText.Contains("failed", StringComparison.OrdinalIgnoreCase) || _statusText.Contains("error", StringComparison.OrdinalIgnoreCase)
+        ? "bg-danger text-light"
+        : _isAgentBusy || _isTestRunning
+            ? "bg-warning text-dark"
+            : "bg-dark text-success";
+
+    protected override async Task OnInitializedAsync()
+    {
+        _config = ConfigOptions.Value;
+        _selectedProviderKey = string.IsNullOrEmpty(_config.ActiveProvider) ? "GoogleGemini" : _config.ActiveProvider;
+        LoadCurrentProviderOverride();
+
+        AgentService.OnStatusUpdate += HandleAgentStatusUpdate;
+        AgentService.OnAgentMessageChunk += HandleAgentMessageChunk;
+        AgentService.OnFileSaved += HandleFileSaved;
+
+        await RefreshTestFiles();
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (firstRender)
+        {
+            _dotNetRef = DotNetObjectReference.Create(this);
+            var mode = GetEditorModeForFile(_selectedFilePath);
+            try
+            {
+                await JS.InvokeVoidAsync("studioCodeEditor.init", "studioCodeTextarea", _dotNetRef, mode, _currentFileContent);
+            }
+            catch { }
+        }
+    }
+
+    private void HandleFileSaved(string savedPath)
+    {
+        InvokeAsync(async () =>
+        {
+            await RefreshTestFiles(savedPath);
+            _statusText = $"Opened generated file: {savedPath}";
+            StateHasChanged();
+        });
+    }
+
+    private async Task ScrollChatToBottomAsync()
+    {
+        try
+        {
+            await JS.InvokeVoidAsync("studioUi.scrollToBottom", "chatScrollArea");
+        }
+        catch { }
+    }
+
+    private async Task ScrollConsoleToBottomAsync(bool force = false)
+    {
+        try
+        {
+            await JS.InvokeVoidAsync("studioUi.scrollToBottom", "consoleScrollArea", force);
+        }
+        catch { }
+    }
+
+    private void LoadCurrentProviderOverride()
+    {
+        if (_config.Providers.TryGetValue(_selectedProviderKey, out var p))
+        {
+            _currentProviderOverride = p.Clone();
+        }
+        else
+        {
+            _currentProviderOverride = new LlmProviderConfig
+            {
+                Type = "Gemini",
+                Endpoint = "https://generativelanguage.googleapis.com/v1beta/openai/",
+                ModelId = "gemini-2.5-flash",
+                ApiKey = ""
+            };
+        }
+    }
+
+    private void OnProviderChanged()
+    {
+        LoadCurrentProviderOverride();
+        _statusText = $"Provider switched to {_selectedProviderKey}.";
+    }
+
+    private void OnQuickApiKeyChanged()
+    {
+        _config.Providers[_selectedProviderKey] = _currentProviderOverride.Clone();
+        _statusText = string.IsNullOrWhiteSpace(_currentProviderOverride.ApiKey)
+            ? $"{_selectedProviderKey} API Key cleared."
+            : $"API Key saved for {_selectedProviderKey}!";
+    }
+
+    private void OnTypeChangedInModal()
+    {
+        if (_currentProviderOverride.Type.Equals("Gemini", StringComparison.OrdinalIgnoreCase))
+        {
+            if (string.IsNullOrWhiteSpace(_currentProviderOverride.Endpoint) || _currentProviderOverride.Endpoint.Contains("localhost"))
+            {
+                _currentProviderOverride.Endpoint = "https://generativelanguage.googleapis.com/v1beta/openai/";
+            }
+            if (string.IsNullOrWhiteSpace(_currentProviderOverride.ModelId) || _currentProviderOverride.ModelId.Contains("qwen") || _currentProviderOverride.ModelId.Contains("gpt") || _currentProviderOverride.ModelId.Contains("llama"))
+            {
+                _currentProviderOverride.ModelId = "gemini-2.5-flash";
+            }
+        }
+        else if (_currentProviderOverride.Type.Equals("OpenWebUI", StringComparison.OrdinalIgnoreCase))
+        {
+            if (string.IsNullOrWhiteSpace(_currentProviderOverride.Endpoint) || _currentProviderOverride.Endpoint.Contains("googleapis") || _currentProviderOverride.Endpoint.Contains(":11434"))
+            {
+                _currentProviderOverride.Endpoint = "http://localhost:3000/api";
+            }
+            if (string.IsNullOrWhiteSpace(_currentProviderOverride.ModelId) || _currentProviderOverride.ModelId.Contains("gemini"))
+            {
+                _currentProviderOverride.ModelId = "llama3:latest";
+            }
+        }
+    }
+
+    private string GetApiKeyTitle() => _currentProviderOverride.Type switch
+    {
+        "Gemini" => "Google Gemini API Key",
+        "OpenWebUI" => "Open WebUI API Key (from Settings > Account > API Keys)",
+        _ => "API Key"
+    };
+
+    private string GetApiKeyPlaceholder() => _currentProviderOverride.Type switch
+    {
+        "Gemini" => "Gemini Key...",
+        "OpenWebUI" => "Open WebUI Key...",
+        _ => "API Key..."
+    };
+
+    private string GetSelectedTargetLabel()
+    {
+        if (string.IsNullOrWhiteSpace(_selectedFilePath))
+        {
+            return "None";
+        }
+        return Path.GetFileName(_selectedFilePath);
+    }
+
+    private void SetModelPreset(string modelId)
+    {
+        _currentProviderOverride.ModelId = modelId;
+    }
+
+    private void ToggleSettingsModal()
+    {
+        _showSettingsModal = !_showSettingsModal;
+    }
+
+    private void SaveProviderSettings()
+    {
+        _config.Providers[_selectedProviderKey] = _currentProviderOverride.Clone();
+        _showSettingsModal = false;
+        _statusText = $"Updated settings for {_selectedProviderKey}.";
+    }
+
+    private void HandleAgentStatusUpdate(string status)
+    {
+        InvokeAsync(() =>
+        {
+            _statusText = status;
+            StateHasChanged();
+        });
+    }
+
+    private void HandleAgentMessageChunk(string chunk)
+    {
+        InvokeAsync(async () =>
+        {
+            _streamingChunk += chunk;
+            StateHasChanged();
+            await ScrollChatToBottomAsync();
+        });
+    }
+
+    private async Task HandleKeyDown(KeyboardEventArgs e)
+    {
+        if (e.Key == "Enter" && e.CtrlKey && !_isAgentBusy && !string.IsNullOrWhiteSpace(_promptInput))
+        {
+            await SendPromptToAgent();
+        }
+    }
+
+    private async Task SendPromptToAgent()
+    {
+        if (string.IsNullOrWhiteSpace(_promptInput) || _isAgentBusy)
+        {
+            return;
+        }
+
+        var prompt = _promptInput.Trim();
+        _promptInput = "";
+        _streamingChunk = "";
+        _isAgentBusy = true;
+        _agentCts = new CancellationTokenSource();
+
+        try
+        {
+            _ = ScrollChatToBottomAsync();
+            await AgentService.ExecutePromptAsync(prompt, _selectedProviderKey, _currentProviderOverride, _agentCts.Token);
+            await RefreshTestFiles();
+        }
+        catch (OperationCanceledException)
+        {
+            _statusText = "Agent cancelled.";
+        }
+        catch (Exception ex)
+        {
+            _statusText = $"Agent error: {ex.Message}";
+        }
+        finally
+        {
+            _streamingChunk = "";
+            _isAgentBusy = false;
+            _agentCts?.Dispose();
+            _agentCts = null;
+            await InvokeAsync(StateHasChanged);
+            _ = ScrollChatToBottomAsync();
+        }
+    }
+
+    private void CancelAgent()
+    {
+        _agentCts?.Cancel();
+    }
+
+    private async Task ResetAgentConversation()
+    {
+        await AgentService.ResetConversationAsync();
+        _streamingChunk = "";
+        _statusText = "Agent conversation reset.";
+    }
+
+    private async Task RefreshTestFiles(string? targetFilePath = null)
+    {
+        _testFiles = await AgentService.GetExistingTestFilesAsync();
+
+        if (!string.IsNullOrEmpty(targetFilePath))
+        {
+            var targetNorm = targetFilePath.Replace('/', '\\');
+            var targetName = Path.GetFileName(targetFilePath);
+            var match = _testFiles.FirstOrDefault(f =>
+                string.Equals(f.RelativePath, targetNorm, StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(f.RelativePath, targetFilePath, StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(f.FileName, targetName, StringComparison.OrdinalIgnoreCase));
+            if (match != null)
+            {
+                _selectedFilePath = match.RelativePath;
+                _currentFileContent = match.Content;
+                await SyncEditorToCurrentFileAsync();
+                return;
+            }
+        }
+
+        if (!string.IsNullOrEmpty(_selectedFilePath))
+        {
+            var match = _testFiles.FirstOrDefault(f => string.Equals(f.RelativePath, _selectedFilePath, StringComparison.OrdinalIgnoreCase));
+            if (match != null)
+            {
+                _currentFileContent = match.Content;
+                await SyncEditorToCurrentFileAsync();
+                return;
+            }
+        }
+
+        if (_testFiles.Count > 0)
+        {
+            _selectedFilePath = _testFiles[0].RelativePath;
+            _currentFileContent = _testFiles[0].Content;
+        }
+        else
+        {
+            _selectedFilePath = "";
+            _currentFileContent = "";
+        }
+
+        await SyncEditorToCurrentFileAsync();
+    }
+
+    private async Task SyncEditorToCurrentFileAsync()
+    {
+        try
+        {
+            if (_dotNetRef != null)
+            {
+                var mode = GetEditorModeForFile(_selectedFilePath);
+                await JS.InvokeVoidAsync("studioCodeEditor.setValue", _currentFileContent, mode);
+            }
+        }
+        catch { }
+    }
+
+    private async Task OnFileSelected()
+    {
+        _showDeleteConfirm = false;
+        var file = _testFiles.FirstOrDefault(f => f.RelativePath == _selectedFilePath);
+        if (file != null)
+        {
+            _currentFileContent = file.Content;
+            await SyncEditorToCurrentFileAsync();
+        }
+    }
+
+    [JSInvokable]
+    public void OnEditorContentChanged(string newContent)
+    {
+        _currentFileContent = newContent;
+    }
+
+    [JSInvokable]
+    public async Task OnEscapePressed()
+    {
+        if (_isEditorFullScreen)
+        {
+            _isEditorFullScreen = false;
+            await InvokeAsync(StateHasChanged);
+            try
+            {
+                await JS.InvokeVoidAsync("studioCodeEditor.refresh");
+            }
+            catch { }
+        }
+    }
+
+    private async Task ToggleEditorFullScreen()
+    {
+        _isEditorFullScreen = !_isEditorFullScreen;
+        await InvokeAsync(StateHasChanged);
+        try
+        {
+            await JS.InvokeVoidAsync("studioCodeEditor.refresh");
+        }
+        catch { }
+    }
+
+    private string GetEditorModeForFile(string path)
+    {
+        if (string.IsNullOrEmpty(path)) return "text/plain";
+        if (path.EndsWith(".feature", StringComparison.OrdinalIgnoreCase)) return "text/x-gherkin";
+        if (path.EndsWith(".cs", StringComparison.OrdinalIgnoreCase)) return "text/x-csharp";
+        return "text/plain";
+    }
+
+    private async Task ConfirmDeleteCurrentFile()
+    {
+        if (string.IsNullOrEmpty(_selectedFilePath))
+        {
+            _showDeleteConfirm = false;
+            return;
+        }
+
+        var fileToDelete = _selectedFilePath;
+        _showDeleteConfirm = false;
+        _statusText = $"Deleting {Path.GetFileName(fileToDelete)}...";
+
+        var success = await AgentService.DeleteTestFileAsync(fileToDelete);
+        if (success)
+        {
+            _statusText = $"Deleted {Path.GetFileName(fileToDelete)}";
+            _selectedFilePath = "";
+            _currentFileContent = "";
+            await RefreshTestFiles();
+        }
+        else
+        {
+            _statusText = $"Failed to delete {Path.GetFileName(fileToDelete)}";
+        }
+    }
+
+    private async Task SaveCurrentFileEdits()
+    {
+        if (string.IsNullOrEmpty(_selectedFilePath))
+        {
+            return;
+        }
+
+        try
+        {
+            var latest = await JS.InvokeAsync<string>("studioCodeEditor.getValue");
+            if (latest != null)
+            {
+                _currentFileContent = latest;
+            }
+        }
+        catch { }
+
+        _statusText = $"Saving {_selectedFilePath}...";
+        var res = await AgentService.SaveFileDirectAsync(_selectedFilePath, _currentFileContent);
+        _statusText = res;
+        await RefreshTestFiles();
+    }
+
+    private async Task RunSpecFlowTests()
+    {
+        if (_isTestRunning)
+        {
+            return;
+        }
+
+        _isTestRunning = true;
+        _statusText = $"Starting SpecFlow tests ({_selectedVisualMode})...";
+        _testCts = new CancellationTokenSource();
+
+        _testConsoleOutput.Clear();
+        _testScenarios.Clear();
+        _testConsoleOutput.Add($"=== SpecFlow Test Execution Started: {DateTime.Now:HH:mm:ss} ===");
+        _testConsoleOutput.Add($"Visual Mode: {_selectedVisualMode}");
+        _testConsoleOutput.Add($"Concurrency: {(_runInParallel ? "Parallel" : "Sequential (1 window at a time)")}");
+        _testConsoleOutput.Add($"Target Scope: {(_targetScope == "selected" ? $"Selected File ({GetSelectedTargetLabel()})" : "All Features")}");
+        _ = ScrollConsoleToBottomAsync(force: true);
+
+        try
+        {
+            var options = new TestRunOptions
+            {
+                Mode = _selectedVisualMode,
+                RunInParallel = _runInParallel,
+                TargetScope = _targetScope,
+                SelectedFilePath = _selectedFilePath
+            };
+
+            var exitCode = await TestRunner.RunTestsAsync(
+                options,
+                line =>
+                {
+                    InvokeAsync(async () =>
+                    {
+                        _testConsoleOutput.Add(line);
+                        ParseScenarioLine(line);
+                        StateHasChanged();
+                        await ScrollConsoleToBottomAsync();
+                    });
+                },
+                _testCts.Token);
+
+            _lastTestExitCode = exitCode;
+            _statusText = exitCode == 0 ? "Tests passed" : $"Tests failed (exit code {exitCode})";
+        }
+        catch (OperationCanceledException)
+        {
+            _statusText = "Tests execution cancelled.";
+        }
+        catch (Exception ex)
+        {
+            _statusText = $"Test runner error: {ex.Message}";
+        }
+        finally
+        {
+            _isTestRunning = false;
+            _testCts?.Dispose();
+            _testCts = null;
+            await InvokeAsync(StateHasChanged);
+            _ = ScrollConsoleToBottomAsync();
+        }
+    }
+
+    private async Task SendFailureToAgent()
+    {
+        await SendScenarioFailureToAgent(null);
+    }
+
+    private async Task SendScenarioFailureToAgent(ScenarioResult? targetScenario)
+    {
+        if (_isAgentBusy) return;
+
+        var sb = new System.Text.StringBuilder();
+        sb.AppendLine("The automated test execution encountered a failure. Please analyze the failure, use your Playwright MCP tools to inspect the target application and locators if needed, and update the test code to fix it.");
+        sb.AppendLine();
+
+        if (targetScenario != null)
+        {
+            sb.AppendLine($"### Failed Scenario: {targetScenario.Name}");
+            if (!string.IsNullOrEmpty(targetScenario.Duration)) sb.AppendLine($"Duration: {targetScenario.Duration}");
+            if (!string.IsNullOrEmpty(targetScenario.ErrorMessage)) sb.AppendLine($"Error: {targetScenario.ErrorMessage}");
+            sb.AppendLine();
+        }
+        else
+        {
+            var failed = _testScenarios.Where(s => !s.Passed).ToList();
+            if (failed.Count > 0)
+            {
+                sb.AppendLine("### Failed Scenarios:");
+                foreach (var f in failed)
+                {
+                    sb.AppendLine($"- **{f.Name}** {(string.IsNullOrEmpty(f.Duration) ? "" : $"[{f.Duration}]")} {(string.IsNullOrEmpty(f.ErrorMessage) ? "" : $"— {f.ErrorMessage}")}");
+                }
+                sb.AppendLine();
+            }
+        }
+
+        // Extract error lines from console output
+        var relevantLines = _testConsoleOutput
+            .Where(l => l.Contains("Failed", StringComparison.OrdinalIgnoreCase)
+                     || l.Contains("Error", StringComparison.OrdinalIgnoreCase)
+                     || l.Contains("Exception", StringComparison.OrdinalIgnoreCase)
+                     || l.Contains("Stack Trace:", StringComparison.OrdinalIgnoreCase)
+                     || l.Contains("at PlaywrightMcpHarness", StringComparison.OrdinalIgnoreCase)
+                     || l.Contains("-> error:", StringComparison.OrdinalIgnoreCase)
+                     || l.StartsWith("   at ")
+                     || l.Contains("Assert."))
+            .Take(30)
+            .ToList();
+
+        if (relevantLines.Count > 0)
+        {
+            sb.AppendLine("### Console Failure Logs:");
+            sb.AppendLine("```");
+            foreach (var line in relevantLines)
+            {
+                sb.AppendLine(line);
+            }
+            sb.AppendLine("```");
+            sb.AppendLine();
+        }
+
+        if (!string.IsNullOrEmpty(_selectedFilePath))
+        {
+            sb.AppendLine($"### Active Workspace File: {_selectedFilePath}");
+            if (!string.IsNullOrWhiteSpace(_currentFileContent))
+            {
+                sb.AppendLine("```");
+                sb.AppendLine(_currentFileContent);
+                sb.AppendLine("```");
+            }
+            sb.AppendLine();
+        }
+
+        sb.AppendLine("Please diagnose the root cause and provide the corrected feature steps and/or step definitions.");
+
+        _promptInput = sb.ToString();
+        await SendPromptToAgent();
+    }
+
+    private void ParseScenarioLine(string line)
+    {
+        var trimmed = line.Trim();
+        if (trimmed.StartsWith("Passed ", StringComparison.OrdinalIgnoreCase) && !trimmed.StartsWith("Passed!", StringComparison.OrdinalIgnoreCase))
+        {
+            var rest = trimmed.Substring(7);
+            var durationMatch = System.Text.RegularExpressions.Regex.Match(rest, @"\[(.*?)\]$");
+            var duration = durationMatch.Success ? durationMatch.Groups[1].Value : "";
+            var name = durationMatch.Success ? rest.Substring(0, durationMatch.Index).Trim() : rest;
+            if (!string.IsNullOrWhiteSpace(name) && !_testScenarios.Any(s => s.Name == name))
+            {
+                _testScenarios.Add(new ScenarioResult { Name = name, Passed = true, Duration = duration });
+            }
+        }
+        else if (trimmed.StartsWith("Failed ", StringComparison.OrdinalIgnoreCase) && !trimmed.StartsWith("Failed!", StringComparison.OrdinalIgnoreCase))
+        {
+            var rest = trimmed.Substring(7);
+            var durationMatch = System.Text.RegularExpressions.Regex.Match(rest, @"\[(.*?)\]$");
+            var duration = durationMatch.Success ? durationMatch.Groups[1].Value : "";
+            var name = durationMatch.Success ? rest.Substring(0, durationMatch.Index).Trim() : rest;
+            if (!string.IsNullOrWhiteSpace(name) && !_testScenarios.Any(s => s.Name == name))
+            {
+                _testScenarios.Add(new ScenarioResult { Name = name, Passed = false, Duration = duration });
+            }
+        }
+    }
+
+    private void CancelTestRun()
+    {
+        _testCts?.Cancel();
+    }
+
+    private void ClearConsole()
+    {
+        _testConsoleOutput.Clear();
+        _testScenarios.Clear();
+        _lastTestExitCode = 0;
+    }
+
+    private string GetConsoleLineClass(string line)
+    {
+        var trimmed = line.TrimStart();
+        if (trimmed.StartsWith("Passed ", StringComparison.OrdinalIgnoreCase) || trimmed.StartsWith("Passed!", StringComparison.OrdinalIgnoreCase))
+        {
+            return "text-success fw-bold";
+        }
+        if (trimmed.StartsWith("Failed ", StringComparison.OrdinalIgnoreCase) || trimmed.StartsWith("Failed!", StringComparison.OrdinalIgnoreCase) || trimmed.StartsWith("[ERR]") || trimmed.Contains("Error Message:", StringComparison.OrdinalIgnoreCase))
+        {
+            return "text-danger fw-bold";
+        }
+        if (trimmed.StartsWith("Given ", StringComparison.OrdinalIgnoreCase) ||
+            trimmed.StartsWith("When ", StringComparison.OrdinalIgnoreCase) ||
+            trimmed.StartsWith("Then ", StringComparison.OrdinalIgnoreCase) ||
+            trimmed.StartsWith("And ", StringComparison.OrdinalIgnoreCase))
+        {
+            return "text-info fw-semibold";
+        }
+        if (trimmed.StartsWith("-> done:", StringComparison.OrdinalIgnoreCase))
+        {
+            return "text-success text-opacity-75 ps-3";
+        }
+        if (trimmed.StartsWith("-> error:", StringComparison.OrdinalIgnoreCase))
+        {
+            return "text-danger fw-bold ps-3";
+        }
+        if (trimmed.StartsWith("===") || trimmed.StartsWith("[Runner]"))
+        {
+            return "text-primary fw-semibold";
+        }
+        if (trimmed.StartsWith("Standard Output Messages:", StringComparison.OrdinalIgnoreCase))
+        {
+            return "text-secondary fst-italic";
+        }
+        return "text-light text-opacity-75";
+    }
+
+    public void Dispose()
+    {
+        AgentService.OnStatusUpdate -= HandleAgentStatusUpdate;
+        AgentService.OnAgentMessageChunk -= HandleAgentMessageChunk;
+        AgentService.OnFileSaved -= HandleFileSaved;
+        _agentCts?.Cancel();
+        _testCts?.Cancel();
+        _dotNetRef?.Dispose();
+    }
+}

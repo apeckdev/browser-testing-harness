@@ -1,0 +1,39 @@
+## Visual Studio / VS Code
+.vs/
+.vscode/
+.idea/
+*.suo
+*.user
+*.userosscache
+*.sln.docstates
+
+## Build Results & Outputs
+[Bb]in/
+[Oo]bj/
+[Oo]ut/
+[Ll]og/
+[Ll]ogs/
+TestResults/
+*.log
+
+## Playwright MCP artifacts & browser caches
+.playwright-mcp/
+**/.playwright-mcp/
+.playwright/
+playwright-report/
+
+## OS generated files
+.DS_Store
+Thumbs.db
+desktop.ini
+
+## Node / NPM
+node_modules/
+npm-debug.log*
+
+## Dynamic SpecFlow Features & Step Definitions
+PlaywrightMcpHarness.Tests/Features/*.feature
+PlaywrightMcpHarness.Tests/Features/*.feature.cs
+PlaywrightMcpHarness.Tests/StepDefinitions/*.cs
+!PlaywrightMcpHarness.Tests/Features/.gitkeep
+!PlaywrightMcpHarness.Tests/StepDefinitions/.gitkeep

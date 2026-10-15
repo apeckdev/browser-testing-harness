@@ -1,0 +1,125 @@
+<!DOCTYPE html>
+<html lang="en" data-bs-theme="dark">
+
+<head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Browser Testing Harness</title>
+    <base href="/" />
+    <link rel="stylesheet" href="bootstrap/bootstrap.min.css" />
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css" />
+    <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" />
+    <link rel="stylesheet" href="lib/codemirror/codemirror.min.css" />
+    <link rel="stylesheet" href="lib/codemirror/material-darker.min.css" />
+    <link rel="stylesheet" href="app.css" />
+    <link rel="stylesheet" href="PlaywrightMcpHarness.Studio.styles.css" />
+    <link rel="icon" type="image/png" href="favicon.png" />
+    <HeadOutlet />
+</head>
+
+<body class="bg-dark text-light m-0 p-0 overflow-hidden" style="height: 100vh; font-family: 'Inter', sans-serif;">
+    <Routes />
+    <script src="_framework/blazor.web.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js"></script>
+    <script src="lib/codemirror/codemirror.min.js"></script>
+    <script src="lib/codemirror/clike.min.js"></script>
+    <script src="lib/codemirror/gherkin.min.js"></script>
+    <script>
+        if (window.CodeMirror) {
+            CodeMirror.defineMIME("text/x-gherkin", "gherkin");
+            CodeMirror.defineMIME("text/x-feature", "gherkin");
+        }
+
+        window.studioUi = {
+            scrollToBottom: function (elementId, force) {
+                var el = document.getElementById(elementId);
+                if (el) {
+                    var isNearBottom = (el.scrollHeight - el.scrollTop - el.clientHeight) < 120;
+                    if (force || isNearBottom) {
+                        el.scrollTop = el.scrollHeight;
+                    }
+                }
+            }
+        };
+
+        window.studioCodeEditor = {
+            instance: null,
+            dotNetHelper: null,
+            updating: false,
+
+            init: function (textareaId, dotNetRef, mode, initialContent) {
+                var el = document.getElementById(textareaId);
+                if (!el) return;
+
+                this.dotNetHelper = dotNetRef;
+                var self = this;
+
+                if (!this.instance) {
+                    this.instance = CodeMirror.fromTextArea(el, {
+                        lineNumbers: true,
+                        theme: 'material-darker',
+                        mode: mode || 'text/x-gherkin',
+                        lineWrapping: false,
+                        tabSize: 4,
+                        indentUnit: 4,
+                        indentWithTabs: false
+                    });
+
+                    this.instance.on('change', function (cm) {
+                        if (!self.updating && self.dotNetHelper) {
+                            var text = cm.getValue();
+                            self.dotNetHelper.invokeMethodAsync('OnEditorContentChanged', text);
+                        }
+                    });
+                }
+
+                if (initialContent !== undefined && initialContent !== null) {
+                    this.setValue(initialContent, mode);
+                }
+
+                setTimeout(function () {
+                    if (self.instance) self.instance.refresh();
+                }, 50);
+            },
+
+            setValue: function (val, mode) {
+                if (!this.instance) return;
+                this.updating = true;
+                try {
+                    if (this.instance.getValue() !== val) {
+                        this.instance.setValue(val || '');
+                    }
+                    if (mode) {
+                        this.instance.setOption('mode', mode);
+                    }
+                    this.instance.refresh();
+                } finally {
+                    this.updating = false;
+                }
+            },
+
+            getValue: function () {
+                return this.instance ? this.instance.getValue() : '';
+            },
+
+            refresh: function () {
+                var self = this;
+                setTimeout(function () {
+                    if (self.instance) {
+                        self.instance.refresh();
+                    }
+                }, 50);
+            }
+        };
+
+        window.addEventListener('keydown', function (e) {
+            if (e.key === 'Escape') {
+                if (window.studioCodeEditor && window.studioCodeEditor.dotNetHelper) {
+                    window.studioCodeEditor.dotNetHelper.invokeMethodAsync('OnEscapePressed');
+                }
+            }
+        });
+    </script>
+</body>
+
+</html>
