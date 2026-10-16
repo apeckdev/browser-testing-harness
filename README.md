@@ -73,6 +73,12 @@ The harness decouples **AI Agent Exploration & Authoring** from **Automated Test
   - Computes a real-time **Suite Health Score** (0–100%) and **Grade** (A+, A, B, C, D, F) displayed in the editor toolbar.
   - Interactive inspection modal with tier filtering, search, and jump-to-source in the code editor.
   - **AI-Powered Auto-Heal**: One-click AI refactoring converting fragile selectors into robust, accessible Playwright locators with a before/after diff preview and one-click disk persistence.
+- **Page Object Model (POM) Architecture & AI Refactoring Tool**:
+  - Full enterprise Page Object Model support separating UI locators and actions (`Pages/*Page.cs`) from SpecFlow step definitions (`StepDefinitions/*Steps.cs`).
+  - Seamless SpecFlow BoDi dependency injection: Page Objects take `IPage page`, and Step Definitions take `<Name>Page pageObject`, cleanly resolved without boilerplate wiring.
+  - **1-Click AI Extract Page Object**: Select any step definition in the Studio editor and click **Extract Page Object** to automatically refactor locators into a new Page Object with clean delegations, tabbed before/after diff preview, and automated build verification.
+  - **Page Objects Catalog & Inspector**: Interactive modal to browse all registered Page Objects, inspect method signatures and parameters, view encapsulated locators, and jump directly to code in the editor.
+  - **Configurable POM Mode**: Toggle Page Object Model generation in the Settings modal to guide the AI authoring agent to produce modular Page Objects for new tests.
 - **Visual Execution Modes**:
   - **Headless**: Maximum CI/CD speed.
   - **Visible Browser (Slow-Mo)**: Headed browser execution with 500ms delay per action for visual verification.
@@ -101,13 +107,14 @@ browser-testing-harness/
 ├── PlaywrightMcpHarness.Studio/         # Blazor Server Web UI & AI Orchestration
 │   ├── Components/                      # Blazor components & pages (Studio.razor)
 │   ├── Models/                          # Configuration & test result models
-│   ├── Services/                        # MCP agent service & SpecFlow test runner
+│   ├── Services/                        # MCP agent, Page Object, step catalog & runner services
 │   ├── wwwroot/                         # CodeMirror editor, Bootstrap, styles
 │   └── appsettings.json                 # LLM provider configurations & MCP settings
 ├── PlaywrightMcpHarness.Tests/          # Executable SpecFlow + Playwright test suite
 │   ├── Features/                        # Dynamic SpecFlow .feature files (.gitignored)
 │   ├── StepDefinitions/                 # Playwright C# step definitions (.gitignored)
-│   ├── Hooks/                           # SpecFlow before/after scenario hooks
+│   ├── Pages/                           # Enterprise Page Objects (.gitignored)
+│   ├── Hooks/                           # SpecFlow before/after scenario hooks (BoDi DI)
 │   ├── specflow.json                    # SpecFlow runtime configuration
 │   └── sequential.runsettings           # Runsettings for sequential execution
 ├── docs/                                # Documentation assets

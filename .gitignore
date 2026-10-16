@@ -39,5 +39,7 @@ npm-debug.log*
 PlaywrightMcpHarness.Tests/Features/*.feature
 PlaywrightMcpHarness.Tests/Features/*.feature.cs
 PlaywrightMcpHarness.Tests/StepDefinitions/*.cs
+PlaywrightMcpHarness.Tests/Pages/*.cs
 !PlaywrightMcpHarness.Tests/Features/.gitkeep
 !PlaywrightMcpHarness.Tests/StepDefinitions/.gitkeep
+!PlaywrightMcpHarness.Tests/Pages/.gitkeep

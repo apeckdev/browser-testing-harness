@@ -10,6 +10,7 @@ public class HarnessConfig
     public string TestsProjectPath { get; set; } = "../PlaywrightMcpHarness.Tests";
     public string ActiveProvider { get; set; } = "LocalOllama";
     public int LlmTimeoutMinutes { get; set; } = 10;
+    public bool UsePageObjectModel { get; set; } = false;
     public Dictionary<string, LlmProviderConfig> Providers { get; set; } = new(StringComparer.OrdinalIgnoreCase);
     public PlaywrightMcpConfig PlaywrightMcp { get; set; } = new();
 }

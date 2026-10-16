@@ -130,7 +130,14 @@ CORE OPERATIONAL RULES:
 
 7. FINAL SUMMARY:
    - Conclude your answer with a clear summary of the steps created, which existing steps were reused, and confirmation that tests are ready for visual execution in the Studio.
-
+{(_config.UsePageObjectModel ? @"
+8. PAGE OBJECT MODEL (POM) ARCHITECTURE ENABLED:
+   - Separate UI locators and actions into dedicated Page Object classes in namespace 'PlaywrightMcpHarness.Tests.Pages'.
+   - Save Page Objects with 'SavePageObjectFile' (e.g., 'Pages/ContactPage.cs').
+   - The Page Object constructor should take 'IPage page'.
+   - Step definitions in 'StepDefinitions/' should inject the Page Object (e.g. 'public ContactSteps(ContactPage contactPage)') and delegate actions to it.
+   - SpecFlow's BoDi DI container will automatically instantiate and inject the Page Object.
+" : "")}
 {stepCatalogSummary}";
 
         _conversationHistory.Add(new ChatMessage(ChatRole.System, systemPrompt));
@@ -375,6 +382,23 @@ CORE OPERATIONAL RULES:
             }
         }
 
+        var pagesDir = Path.Combine(root, "Pages");
+        if (Directory.Exists(pagesDir))
+        {
+            foreach (var file in Directory.GetFiles(pagesDir, "*.cs", SearchOption.AllDirectories))
+            {
+                var rel = Path.GetRelativePath(root, file);
+                var content = await File.ReadAllTextAsync(file);
+                result.Add(new TestFileInfo
+                {
+                    RelativePath = rel,
+                    FileName = Path.GetFileName(file),
+                    FileType = "PageObject",
+                    Content = content
+                });
+            }
+        }
+
         return result;
     }
 
@@ -496,6 +520,18 @@ CORE OPERATIONAL RULES:
             }
         }
 
+        var pagesDir = Path.Combine(root, "Pages");
+        if (Directory.Exists(pagesDir))
+        {
+            foreach (var file in Directory.GetFiles(pagesDir, "*.cs", SearchOption.AllDirectories))
+            {
+                var rel = Path.GetRelativePath(root, file);
+                sb.AppendLine($"=== File: {rel} ===");
+                sb.AppendLine(File.ReadAllText(file));
+                sb.AppendLine();
+            }
+        }
+
         var result = sb.ToString();
         return string.IsNullOrWhiteSpace(result) ? "No existing test files found in project." : result;
     }
@@ -559,6 +595,33 @@ CORE OPERATIONAL RULES:
         return $"Successfully wrote {safeName} into StepDefinitions/ directory.";
     }
 
+    private async Task<string> ToolSavePageObjectFileAsync(string fileName, string csharpCode)
+    {
+        OnStatusUpdate?.Invoke($"Executing Tool: SavePageObjectFile ({fileName})...");
+        if (!fileName.EndsWith(".cs", StringComparison.OrdinalIgnoreCase))
+        {
+            fileName += ".cs";
+        }
+
+        var safeName = Path.GetFileName(fileName);
+        var root = GetTestsProjectRoot();
+        var pagesDir = Path.Combine(root, "Pages");
+        if (!Directory.Exists(pagesDir))
+        {
+            Directory.CreateDirectory(pagesDir);
+        }
+
+        var filePath = Path.Combine(pagesDir, safeName);
+        await File.WriteAllTextAsync(filePath, csharpCode, Encoding.UTF8);
+
+        OnStatusUpdate?.Invoke($"Saved Page Object: {safeName}");
+
+        var relPath = Path.Combine("Pages", safeName);
+        OnFileSaved?.Invoke(relPath);
+
+        return $"Successfully wrote {safeName} into Pages/ directory.";
+    }
+
     private string ToolGetExistingStepCatalog()
     {
         OnStatusUpdate?.Invoke("Executing Tool: GetExistingStepCatalog...");
@@ -610,10 +673,16 @@ CORE OPERATIONAL RULES:
             "SaveStepDefinitionFile",
             "Writes/updates a *Steps.cs file in PlaywrightMcpHarness.Tests/StepDefinitions.");
 
+        var savePageObjectTool = AIFunctionFactory.Create(
+            ToolSavePageObjectFileAsync,
+            "SavePageObjectFile",
+            "Writes/updates a Page Object class in PlaywrightMcpHarness.Tests/Pages/.");
+
         allTools.Add(new ObservableAIFunction(readTool, name => OnStatusUpdate?.Invoke($"Executing Local Tool: {name}...")));
         allTools.Add(new ObservableAIFunction(catalogTool, name => OnStatusUpdate?.Invoke($"Executing Local Tool: {name}...")));
         allTools.Add(new ObservableAIFunction(saveFeatureTool, name => OnStatusUpdate?.Invoke($"Executing Local Tool: {name}...")));
         allTools.Add(new ObservableAIFunction(saveStepTool, name => OnStatusUpdate?.Invoke($"Executing Local Tool: {name}...")));
+        allTools.Add(new ObservableAIFunction(savePageObjectTool, name => OnStatusUpdate?.Invoke($"Executing Local Tool: {name}...")));
 
         _conversationHistory.Add(new ChatMessage(ChatRole.User, userPrompt));
 

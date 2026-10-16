@@ -7,6 +7,7 @@
 @inject IStepCatalogService StepCatalog
 @inject IScenarioOutlineService ScenarioOutlineService
 @inject ILocatorHealthService LocatorHealthService
+@inject IPageObjectService PageObjectService
 @inject IOptions<HarnessConfig> ConfigOptions
 @inject IJSRuntime JS
 
@@ -378,6 +379,26 @@
                                 </button>
                             }
 
+                            @if (_selectedFilePath.EndsWith("Steps.cs", StringComparison.OrdinalIgnoreCase))
+                            {
+                                <!-- AI Extract Page Object Button -->
+                                <button class="btn btn-sm btn-outline-primary d-flex align-items-center gap-1 py-0 px-2 text-nowrap"
+                                        title="Refactor step definition and extract reusable Page Object with AI"
+                                        @onclick="OpenExtractPageObjectModal">
+                                    <i class="bi bi-box-arrow-up-right"></i>
+                                    <span class="d-none d-sm-inline" style="font-size: 0.75rem;">Extract Page Object</span>
+                                </button>
+                            }
+
+                            <!-- Page Objects Catalog Button -->
+                            <button class="btn btn-sm btn-outline-secondary d-flex align-items-center gap-1 py-0 px-2 text-nowrap"
+                                    title="View Page Objects catalog, methods, and locators"
+                                    @onclick="OpenPageObjectCatalogModal">
+                                <i class="bi bi-layers"></i>
+                                <span class="d-none d-sm-inline" style="font-size: 0.75rem;">Page Objects</span>
+                                <span class="badge bg-secondary bg-opacity-50 text-light rounded-pill px-1" style="font-size: 0.7rem;">@(_pageObjects.Count)</span>
+                            </button>
+
                             <!-- Full Screen Toggle Button -->
                             <button class="btn btn-sm btn-outline-secondary d-flex align-items-center gap-1 py-0 px-2"
                                     title="@(_isEditorFullScreen ? "Exit Full Screen (Esc)" : "Expand Editor to Full Screen")"
@@ -663,6 +684,17 @@
                                @bind="_playwrightServerUrl" />
                         <div class="form-text text-secondary" style="font-size: 0.75rem;">
                             Leave empty to launch a local browser window via <kbd class="bg-secondary bg-opacity-25 text-light">npx @@playwright/mcp</kbd>. Specify an HTTP/SSE URL to connect to an external or containerized Playwright MCP server.
+                        </div>
+                    </div>
+                    <div class="border-top border-secondary border-opacity-25 pt-2">
+                        <div class="form-check form-switch d-flex align-items-center gap-2">
+                            <input class="form-check-input mt-0" type="checkbox" role="switch" id="pomSwitch" @bind="_config.UsePageObjectModel" />
+                            <label class="form-check-label text-light small fw-semibold user-select-none" for="pomSwitch" style="cursor: pointer;">
+                                <i class="bi bi-layers me-1 text-primary"></i>Enable Page Object Model (POM) Mode
+                            </label>
+                        </div>
+                        <div class="form-text text-secondary mt-1" style="font-size: 0.75rem;">
+                            When enabled, the AI Agent organizes generated tests into Page Objects in <code>PlaywrightMcpHarness.Tests/Pages/</code> and injects them into SpecFlow step definitions via BoDi DI.
                         </div>
                     </div>
                     <div class="alert alert-secondary bg-dark border-secondary border-opacity-50 text-secondary mb-0 p-2" style="font-size: 0.8rem;">
@@ -1395,6 +1427,317 @@
     </div>
 }
 
+<!-- Modal: AI Extract Page Object Refactor -->
+@if (_showExtractPoModal)
+{
+    <div class="modal fade show d-block" tabindex="-1" style="background-color: rgba(0,0,0,0.85); z-index: 1060;" @onclick="CloseExtractPageObjectModal">
+        <div class="modal-dialog modal-xl modal-dialog-centered modal-dialog-scrollable" @onclick:stopPropagation>
+            <div class="modal-content bg-dark text-light border border-primary shadow-lg" style="max-height: 90vh;">
+                <div class="modal-header border-secondary border-opacity-50 py-2 d-flex justify-content-between align-items-center">
+                    <div class="d-flex align-items-center gap-2">
+                        <i class="bi bi-box-arrow-up-right text-primary fs-5"></i>
+                        <div>
+                            <h6 class="modal-title mb-0 fw-semibold">Extract Page Object Model with AI</h6>
+                            <span class="small text-secondary">Source: @_selectedFilePath</span>
+                        </div>
+                    </div>
+                    <button type="button" class="btn-close btn-close-white" @onclick="CloseExtractPageObjectModal"></button>
+                </div>
+
+                <div class="modal-body p-3 d-flex flex-column gap-3" style="overflow-y: auto;">
+                    <!-- Configuration & Input Controls -->
+                    <div class="row g-2">
+                        <div class="col-md-5">
+                            <label class="form-label small fw-semibold text-light mb-1">Target Page Object Name</label>
+                            <div class="input-group input-group-sm">
+                                <span class="input-group-text bg-black border-secondary border-opacity-50 text-secondary">
+                                    <i class="bi bi-file-earmark-code"></i>
+                                </span>
+                                <input type="text"
+                                       class="form-control bg-dark text-light border-secondary border-opacity-50"
+                                       placeholder="e.g. ContactPage"
+                                       @bind="_suggestedPoName"
+                                       disabled="@_isExtractingPo" />
+                            </div>
+                            <div class="form-text text-secondary" style="font-size: 0.72rem;">
+                                Will be placed in <code>PlaywrightMcpHarness.Tests/Pages/</code>
+                            </div>
+                        </div>
+                        <div class="col-md-7">
+                            <label class="form-label small fw-semibold text-light mb-1">Custom Architecture Instructions (Optional)</label>
+                            <input type="text"
+                                   class="form-control form-control-sm bg-dark text-light border-secondary border-opacity-50"
+                                   placeholder="e.g., Expose FillFormAsync helper, group assertions by section..."
+                                   @bind="_extractPoGuidance"
+                                   disabled="@_isExtractingPo" />
+                            <div class="form-text text-secondary" style="font-size: 0.72rem;">
+                                Prompt guidance given to the AI during code refactoring
+                            </div>
+                        </div>
+                    </div>
+
+                    @if (_isExtractingPo)
+                    {
+                        <div class="d-flex flex-column align-items-center justify-content-center p-4 bg-black bg-opacity-40 rounded border border-primary border-opacity-25 text-center" style="min-height: 250px;">
+                            <div class="spinner-border text-primary mb-2" role="status"></div>
+                            <div class="fw-semibold text-primary">Refactoring Step Definitions into Page Object...</div>
+                            <div class="small text-secondary">Encapsulating locators and generating SpecFlow BoDi constructor injection</div>
+                        </div>
+                    }
+                    else if (_extractPoResponse != null && _extractPoResponse.Success)
+                    {
+                        <!-- Explanation Banner -->
+                        <div class="alert alert-info py-2 px-3 small mb-0 border-info border-opacity-25 bg-black bg-opacity-30 d-flex align-items-start gap-2">
+                            <i class="bi bi-info-circle-fill text-info mt-1 flex-shrink-0"></i>
+                            <div>
+                                <strong class="text-light">Architecture Refactor Summary:</strong>
+                                <span class="text-secondary ms-1">@_extractPoResponse.Explanation</span>
+                            </div>
+                        </div>
+
+                        <!-- Diff / Code Preview Tabs -->
+                        <div>
+                            <ul class="nav nav-pills nav-fill mb-2 bg-black bg-opacity-40 p-1 rounded border border-secondary border-opacity-25">
+                                <li class="nav-item">
+                                    <button class="nav-link btn-sm py-1 @(_extractPoActiveTab == "pageObject" ? "active bg-primary text-light" : "text-secondary")"
+                                            @onclick='() => _extractPoActiveTab = "pageObject"'>
+                                        <i class="bi bi-file-earmark-code me-1"></i>New Page Object: Pages/@_extractPoResponse.PageObjectFileName
+                                    </button>
+                                </li>
+                                <li class="nav-item">
+                                    <button class="nav-link btn-sm py-1 @(_extractPoActiveTab == "stepDefinition" ? "active bg-primary text-light" : "text-secondary")"
+                                            @onclick='() => _extractPoActiveTab = "stepDefinition"'>
+                                        <i class="bi bi-arrow-repeat me-1"></i>Refactored Steps: @Path.GetFileName(_selectedFilePath)
+                                    </button>
+                                </li>
+                            </ul>
+
+                            @if (_extractPoActiveTab == "pageObject")
+                            {
+                                <div class="position-relative">
+                                    <div class="d-flex justify-content-between align-items-center px-3 py-1 bg-black bg-opacity-60 border-top border-start border-end border-secondary border-opacity-25 rounded-top">
+                                        <span class="small font-monospace text-info">Pages/@_extractPoResponse.PageObjectFileName</span>
+                                        <button class="btn btn-xs btn-outline-secondary" @onclick='() => CopyToClipboardAsync(_extractPoResponse.GeneratedPageObjectCode)'>
+                                            <i class="bi bi-clipboard"></i> Copy
+                                        </button>
+                                    </div>
+                                    <pre class="bg-black p-3 text-info font-monospace small mb-0 border border-secondary border-opacity-25 rounded-bottom" style="max-height: 340px; overflow-y: auto; font-size: 0.82rem; white-space: pre-wrap;">@_extractPoResponse.GeneratedPageObjectCode</pre>
+                                </div>
+                            }
+                            else
+                            {
+                                <div class="position-relative">
+                                    <div class="d-flex justify-content-between align-items-center px-3 py-1 bg-black bg-opacity-60 border-top border-start border-end border-secondary border-opacity-25 rounded-top">
+                                        <span class="small font-monospace text-warning">@_selectedFilePath (Refactored to inject @_extractPoResponse.PageObjectClassName)</span>
+                                        <button class="btn btn-xs btn-outline-secondary" @onclick='() => CopyToClipboardAsync(_extractPoResponse.RefactoredStepDefinitionCode)'>
+                                            <i class="bi bi-clipboard"></i> Copy
+                                        </button>
+                                    </div>
+                                    <pre class="bg-black p-3 text-warning font-monospace small mb-0 border border-secondary border-opacity-25 rounded-bottom" style="max-height: 340px; overflow-y: auto; font-size: 0.82rem; white-space: pre-wrap;">@_extractPoResponse.RefactoredStepDefinitionCode</pre>
+                                </div>
+                            }
+                        </div>
+                    }
+                    else if (!string.IsNullOrEmpty(_extractPoErrorMessage))
+                    {
+                        <div class="alert alert-danger py-2 px-3 small mb-0">
+                            <i class="bi bi-exclamation-triangle me-1"></i>@_extractPoErrorMessage
+                        </div>
+                    }
+                </div>
+
+                <div class="modal-footer border-secondary border-opacity-50 py-2 d-flex justify-content-between align-items-center">
+                    <button type="button" class="btn btn-sm btn-outline-primary" @onclick="TriggerExtractPageObject" disabled="@_isExtractingPo">
+                        <i class="bi bi-arrow-repeat"></i> @(_extractPoResponse != null ? "Re-generate Extraction" : "Generate Extraction")
+                    </button>
+                    <div class="d-flex align-items-center gap-2">
+                        @if (_extractPoResponse != null && _extractPoResponse.Success)
+                        {
+                            <button type="button" class="btn btn-sm btn-success d-flex align-items-center gap-1 shadow-sm"
+                                    @onclick="ApplyExtractPoAsync"
+                                    disabled="@_isExtractingPo">
+                                <i class="bi bi-check2-circle"></i> Apply & Refactor Suite
+                            </button>
+                        }
+                        <button type="button" class="btn btn-sm btn-secondary" @onclick="CloseExtractPageObjectModal">Close</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+}
+
+<!-- Modal: Page Objects Catalog & Inspector -->
+@if (_showPoCatalogModal)
+{
+    <div class="modal fade show d-block" tabindex="-1" style="background-color: rgba(0,0,0,0.85); z-index: 1055;" @onclick="ClosePageObjectCatalogModal">
+        <div class="modal-dialog modal-xl modal-dialog-centered modal-dialog-scrollable" @onclick:stopPropagation>
+            <div class="modal-content bg-dark text-light border border-secondary shadow-lg" style="max-height: 88vh;">
+                <div class="modal-header border-secondary border-opacity-50 py-2 d-flex justify-content-between align-items-center">
+                    <div class="d-flex align-items-center gap-2">
+                        <i class="bi bi-layers text-primary fs-5"></i>
+                        <div>
+                            <h6 class="modal-title mb-0 fw-semibold">Page Objects Catalog</h6>
+                            <span class="small text-secondary">
+                                @_pageObjects.Count Page Object@(_pageObjects.Count == 1 ? "" : "s") registered in <code>PlaywrightMcpHarness.Tests/Pages/</code>
+                            </span>
+                        </div>
+                    </div>
+                    <button type="button" class="btn-close btn-close-white" @onclick="ClosePageObjectCatalogModal"></button>
+                </div>
+
+                <div class="modal-body p-3 d-flex flex-column gap-3" style="overflow-y: auto;">
+                    <!-- Search & Filter Bar -->
+                    <div class="d-flex align-items-center gap-2">
+                        <div class="input-group input-group-sm flex-grow-1">
+                            <span class="input-group-text bg-black text-secondary border-secondary border-opacity-50">
+                                <i class="bi bi-search"></i>
+                            </span>
+                            <input type="text"
+                                   class="form-control bg-dark text-light border-secondary border-opacity-50"
+                                   placeholder="Filter Page Objects by class, method name, or locator expression..."
+                                   @bind="_poCatalogSearchQuery"
+                                   @bind:event="oninput" />
+                            @if (!string.IsNullOrEmpty(_poCatalogSearchQuery))
+                            {
+                                <button class="btn btn-outline-secondary border-secondary border-opacity-50" @onclick='() => _poCatalogSearchQuery = ""'>
+                                    <i class="bi bi-x"></i>
+                                </button>
+                            }
+                        </div>
+                        <button class="btn btn-sm btn-outline-secondary d-flex align-items-center gap-1 text-nowrap"
+                                @onclick="RefreshPageObjectsCatalog">
+                            <i class="bi bi-arrow-repeat"></i> Re-scan
+                        </button>
+                    </div>
+
+                    @if (_pageObjects.Count == 0)
+                    {
+                        <div class="text-center p-5 bg-black bg-opacity-30 rounded border border-secondary border-opacity-25">
+                            <i class="bi bi-layers text-secondary display-5 mb-3 d-block"></i>
+                            <h6 class="text-light">No Page Objects Found</h6>
+                            <p class="text-secondary small mb-3">
+                                No <code>*Page.cs</code> classes currently exist in <code>PlaywrightMcpHarness.Tests/Pages/</code>.
+                            </p>
+                            <p class="text-secondary small">
+                                Select a <code>*Steps.cs</code> file in the editor and click <strong>Extract Page Object</strong> to automatically generate your first Page Object!
+                            </p>
+                        </div>
+                    }
+                    else
+                    {
+                        <div class="row g-3" style="min-height: 420px;">
+                            <!-- Left Column: List of Page Objects -->
+                            <div class="col-md-4 d-flex flex-column gap-2" style="max-height: 460px; overflow-y: auto;">
+                                @foreach (var po in FilteredPageObjects)
+                                {
+                                    <div class="card p-2 border @(po == _selectedCatalogPo ? "border-primary bg-primary bg-opacity-10" : "border-secondary border-opacity-25 bg-black bg-opacity-30") cursor-pointer"
+                                         style="cursor: pointer;"
+                                         @onclick="() => _selectedCatalogPo = po">
+                                        <div class="d-flex align-items-center justify-content-between mb-1">
+                                            <span class="fw-semibold text-light font-monospace small">@po.ClassName</span>
+                                            <span class="badge bg-secondary bg-opacity-50 text-light" style="font-size: 0.68rem;">
+                                                @po.Methods.Count method@(po.Methods.Count == 1 ? "" : "s")
+                                            </span>
+                                        </div>
+                                        <div class="text-secondary font-monospace" style="font-size: 0.72rem;">@po.FileName</div>
+                                        <div class="mt-1 d-flex gap-1 flex-wrap">
+                                            <span class="badge bg-info bg-opacity-10 text-info border border-info border-opacity-25" style="font-size: 0.65rem;">
+                                                <i class="bi bi-crosshair me-1"></i>@po.Locators.Count locator@(po.Locators.Count == 1 ? "" : "s")
+                                            </span>
+                                        </div>
+                                    </div>
+                                }
+                            </div>
+
+                            <!-- Right Column: Details of Selected Page Object -->
+                            <div class="col-md-8 d-flex flex-column gap-3" style="max-height: 460px; overflow-y: auto;">
+                                @if (_selectedCatalogPo != null)
+                                {
+                                    <div class="d-flex align-items-center justify-content-between p-2 bg-black bg-opacity-40 rounded border border-secondary border-opacity-25">
+                                        <div>
+                                            <div class="fw-bold text-light font-monospace">@_selectedCatalogPo.ClassName</div>
+                                            <div class="small text-secondary font-monospace">Pages/@_selectedCatalogPo.FileName</div>
+                                        </div>
+                                        <div class="d-flex gap-2">
+                                            <button class="btn btn-sm btn-outline-primary d-flex align-items-center gap-1"
+                                                    @onclick="() => NavigateToPageObjectFile(_selectedCatalogPo)">
+                                                <i class="bi bi-code-slash"></i> Open in Editor
+                                            </button>
+                                        </div>
+                                    </div>
+
+                                    <!-- Locators Section -->
+                                    <div class="card p-2 border-secondary border-opacity-25 bg-black bg-opacity-20">
+                                        <div class="fw-semibold small text-info mb-2 d-flex align-items-center gap-1">
+                                            <i class="bi bi-crosshair"></i> Encapsulated Locators (@_selectedCatalogPo.Locators.Count)
+                                        </div>
+                                        @if (_selectedCatalogPo.Locators.Count == 0)
+                                        {
+                                            <div class="small text-secondary">No locators parsed.</div>
+                                        }
+                                        else
+                                        {
+                                            <div class="d-flex flex-column gap-1">
+                                                @foreach (var loc in _selectedCatalogPo.Locators)
+                                                {
+                                                    <div class="font-monospace small text-light bg-dark p-1 px-2 rounded border border-secondary border-opacity-25 text-truncate" title="@loc">
+                                                        @loc
+                                                    </div>
+                                                }
+                                            </div>
+                                        }
+                                    </div>
+
+                                    <!-- Methods Section -->
+                                    <div class="card p-2 border-secondary border-opacity-25 bg-black bg-opacity-20">
+                                        <div class="fw-semibold small text-success mb-2 d-flex align-items-center gap-1">
+                                            <i class="bi bi-braces"></i> Page Action & Assertion Methods (@_selectedCatalogPo.Methods.Count)
+                                        </div>
+                                        @if (_selectedCatalogPo.Methods.Count == 0)
+                                        {
+                                            <div class="small text-secondary">No public methods parsed.</div>
+                                        }
+                                        else
+                                        {
+                                            <div class="d-flex flex-column gap-2">
+                                                @foreach (var method in _selectedCatalogPo.Methods)
+                                                {
+                                                    <div class="p-2 bg-dark rounded border border-secondary border-opacity-25">
+                                                        <div class="d-flex align-items-center justify-content-between">
+                                                            <div class="font-monospace small fw-semibold text-light">
+                                                                <span class="text-primary">@method.ReturnType</span> @method.Signature
+                                                            </div>
+                                                        </div>
+                                                        @if (method.Parameters.Count > 0)
+                                                        {
+                                                            <div class="small text-secondary mt-1 font-monospace" style="font-size: 0.72rem;">
+                                                                Params: @string.Join(", ", method.Parameters)
+                                                            </div>
+                                                        }
+                                                    </div>
+                                                }
+                                            </div>
+                                        }
+                                    </div>
+                                }
+                                else
+                                {
+                                    <div class="text-secondary small text-center p-4">Select a Page Object from the list to view its locators and action methods.</div>
+                                }
+                            </div>
+                        </div>
+                    }
+                </div>
+
+                <div class="modal-footer border-secondary border-opacity-50 py-2">
+                    <button type="button" class="btn btn-sm btn-secondary" @onclick="ClosePageObjectCatalogModal">Close</button>
+                </div>
+            </div>
+        </div>
+    </div>
+}
+
 <style>
     .cursor-blink {
         display: inline-block;
@@ -1906,6 +2249,183 @@
         catch { }
     }
 
+    private List<PageObjectInfo> _pageObjects = new();
+    private bool _showExtractPoModal;
+    private bool _isExtractingPo;
+    private string _suggestedPoName = "";
+    private string _extractPoGuidance = "";
+    private ExtractPageObjectResponse? _extractPoResponse;
+    private string? _extractPoErrorMessage;
+    private string _extractPoActiveTab = "pageObject";
+    private CancellationTokenSource? _extractPoCts;
+
+    private bool _showPoCatalogModal;
+    private string _poCatalogSearchQuery = "";
+    private PageObjectInfo? _selectedCatalogPo;
+
+    private IEnumerable<PageObjectInfo> FilteredPageObjects
+    {
+        get
+        {
+            var list = _pageObjects.AsEnumerable();
+            if (!string.IsNullOrWhiteSpace(_poCatalogSearchQuery))
+            {
+                var q = _poCatalogSearchQuery.Trim();
+                list = list.Where(p =>
+                    p.ClassName.Contains(q, StringComparison.OrdinalIgnoreCase) ||
+                    p.FileName.Contains(q, StringComparison.OrdinalIgnoreCase) ||
+                    p.Methods.Any(m => m.MethodName.Contains(q, StringComparison.OrdinalIgnoreCase) || m.Signature.Contains(q, StringComparison.OrdinalIgnoreCase)) ||
+                    p.Locators.Any(l => l.Contains(q, StringComparison.OrdinalIgnoreCase)));
+            }
+            return list;
+        }
+    }
+
+    private void OpenExtractPageObjectModal()
+    {
+        var baseName = Path.GetFileNameWithoutExtension(_selectedFilePath);
+        if (baseName.EndsWith("Steps", StringComparison.OrdinalIgnoreCase))
+        {
+            baseName = baseName.Substring(0, baseName.Length - 5);
+        }
+        _suggestedPoName = $"{baseName}Page";
+        _extractPoGuidance = "";
+        _extractPoResponse = null;
+        _extractPoErrorMessage = null;
+        _extractPoActiveTab = "pageObject";
+        _showExtractPoModal = true;
+    }
+
+    private void CloseExtractPageObjectModal()
+    {
+        _extractPoCts?.Cancel();
+        _isExtractingPo = false;
+        _showExtractPoModal = false;
+    }
+
+    private async Task TriggerExtractPageObject()
+    {
+        if (string.IsNullOrWhiteSpace(_selectedFilePath)) return;
+
+        _isExtractingPo = true;
+        _extractPoErrorMessage = null;
+        _extractPoResponse = null;
+        _extractPoCts = new CancellationTokenSource();
+
+        try
+        {
+            var req = new ExtractPageObjectRequest
+            {
+                SourceStepDefinitionFile = _selectedFilePath,
+                SourceStepDefinitionCode = _currentFileContent,
+                SuggestedPageObjectName = _suggestedPoName,
+                UserGuidance = _extractPoGuidance
+            };
+
+            var res = await PageObjectService.ExtractPageObjectFromStepsAsync(
+                req,
+                _selectedProviderKey,
+                _currentProviderOverride,
+                _extractPoCts.Token);
+
+            if (res.Success)
+            {
+                _extractPoResponse = res;
+                _extractPoActiveTab = "pageObject";
+            }
+            else
+            {
+                _extractPoErrorMessage = res.ErrorMessage;
+            }
+        }
+        catch (Exception ex)
+        {
+            _extractPoErrorMessage = ex.Message;
+        }
+        finally
+        {
+            _isExtractingPo = false;
+            _extractPoCts?.Dispose();
+            _extractPoCts = null;
+            await InvokeAsync(StateHasChanged);
+        }
+    }
+
+    private async Task ApplyExtractPoAsync()
+    {
+        if (_extractPoResponse == null || !_extractPoResponse.Success) return;
+
+        try
+        {
+            var res = await PageObjectService.ApplyPageObjectExtractionAsync(
+                _selectedFilePath,
+                _extractPoResponse.PageObjectFileName,
+                _extractPoResponse.GeneratedPageObjectCode,
+                _extractPoResponse.RefactoredStepDefinitionCode);
+
+            _statusText = res;
+            _showExtractPoModal = false;
+            var poPath = Path.Combine("Pages", _extractPoResponse.PageObjectFileName);
+            await RefreshTestFiles(poPath);
+        }
+        catch (Exception ex)
+        {
+            _extractPoErrorMessage = $"Failed to apply refactor: {ex.Message}";
+        }
+    }
+
+    private async Task OpenPageObjectCatalogModal()
+    {
+        _poCatalogSearchQuery = "";
+        await RefreshPageObjectsCatalog();
+        _selectedCatalogPo = _pageObjects.FirstOrDefault();
+        _showPoCatalogModal = true;
+    }
+
+    private void ClosePageObjectCatalogModal()
+    {
+        _showPoCatalogModal = false;
+    }
+
+    private async Task RefreshPageObjectsCatalog()
+    {
+        _pageObjects = await PageObjectService.GetPageObjectsAsync(forceReload: true);
+        if (_selectedCatalogPo != null)
+        {
+            _selectedCatalogPo = _pageObjects.FirstOrDefault(p => p.FileName == _selectedCatalogPo.FileName) ?? _pageObjects.FirstOrDefault();
+        }
+        else
+        {
+            _selectedCatalogPo = _pageObjects.FirstOrDefault();
+        }
+        StateHasChanged();
+    }
+
+    private async Task NavigateToPageObjectFile(PageObjectInfo po)
+    {
+        _showPoCatalogModal = false;
+        var match = _testFiles.FirstOrDefault(f =>
+            f.FileName.Equals(po.FileName, StringComparison.OrdinalIgnoreCase) ||
+            f.RelativePath.EndsWith(po.FileName, StringComparison.OrdinalIgnoreCase));
+        if (match != null)
+        {
+            _selectedFilePath = match.RelativePath;
+            _currentFileContent = match.Content;
+            await SyncEditorToCurrentFileAsync();
+            _statusText = $"Opened Page Object: {po.FileName}";
+        }
+    }
+
+    private async Task CopyToClipboardAsync(string text)
+    {
+        try
+        {
+            await JS.InvokeVoidAsync("navigator.clipboard.writeText", text);
+            _statusText = "Copied to clipboard.";
+        }
+        catch { }
+    }
+
     public class ScenarioResult
     {
         public string Name { get; set; } = "";
@@ -2176,6 +2696,7 @@
         _testFiles = await AgentService.GetExistingTestFilesAsync();
         await StepCatalog.ScanStepDefinitionsAsync(forceReload: true);
         _locatorReport = await LocatorHealthService.AnalyzeTestSuiteLocatorsAsync(forceReload: true);
+        _pageObjects = await PageObjectService.GetPageObjectsAsync(forceReload: true);
         try
         {
             await JS.InvokeVoidAsync("studioCodeEditor.setStepCatalog", StepCatalog.Steps);
