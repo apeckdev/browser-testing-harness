@@ -91,9 +91,14 @@ CORE OPERATIONAL RULES:
    - When asked to create or update tests for a web application, ALWAYS use the Playwright MCP browser tools (e.g., browser_navigate, browser_snapshot, browser_click, browser_fill, etc.) to explore the target URL live in the visible Chromium browser.
    - Inspect the accessibility snapshot carefully to discover robust, resilient locators and exact text/titles.
 
-2. LOCATOR RESILIENCE & PLAYWRIGHT STRICT MODE:
-   - Prefer user-facing role locators: GetByRole(AriaRole.Button, new() {{ Name = '...' }}), GetByRole(AriaRole.Textbox), etc.
-   - Avoid brittle CSS selectors or absolute XPath expressions.
+2. LOCATOR RESILIENCE & PLAYWRIGHT STRICT MODE (CRITICAL BEST PRACTICES):
+   - ALWAYS prioritize user-facing semantic Playwright locators:
+     * Page.GetByRole(AriaRole.<Role>, new() {{ Name = '...' }}) for buttons, links, headings, checkboxes, etc.
+     * Page.GetByLabel('...') for form controls
+     * Page.GetByPlaceholder('...') for inputs with placeholder text
+     * Page.GetByText('...') for static labels/headings
+     * Page.GetByTestId('...') when no accessible user-facing role/label exists
+   - NEVER use brittle structural CSS selectors (e.g. 'div > ul > li:nth-child(2) > a'), unadorned bare tags ('button', 'input'), or deep XPath ('//div/form/div[2]/...').
    - When targeting links or buttons that may appear both in header navigation and footer areas, scope them or use '.First' (e.g. GetByRole(AriaRole.Link, new() {{ Name = ... }}).First) to avoid Playwright strict mode violations.
 
 3. STEP DEFINITION REUSE (DEDUPLICATION - CRITICAL):

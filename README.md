@@ -63,6 +63,15 @@ The harness decouples **AI Agent Exploration & Authoring** from **Automated Test
   - One-click conversion of concrete Gherkin scenarios into parameterized `Scenario Outline:` specifications with an AI-generated boundary matrix.
   - Granular edge-case category toggles: **Happy Path**, **Boundary Limits & Field Lengths**, **Empty & Whitespace**, **Unicode & Internationalization** (`René`, `O'Connor`), **Security Sanity** (HTML/XSS, SQL quotes), and **Malformed Formats**.
   - Instant in-editor replacement or appending with real-time Gherkin validation.
+- **Playwright Locator Health & Best Practices Linter**:
+  - Automated static code analysis inspecting all C# step definitions (`StepDefinitions/*.cs`) for Playwright locators.
+  - Classifies locators against official Playwright best practices:
+    - 🟢 **Resilient** (100%): User-facing semantic accessibility locators (`GetByRole`, `GetByLabel`, `GetByPlaceholder`, `GetByText`, `GetByTestId`).
+    - 🟡 **Caution** (60–75%): Generic IDs or single attribute selectors.
+    - 🔴 **Fragile** (10–30%): Anti-patterns including structural DOM traversal (`:nth-child`, `div > span > button`), complex XPaths, and unadorned tag selectors.
+  - Computes a real-time **Suite Health Score** (0–100%) and **Grade** (A+, A, B, C, D, F) displayed in the editor toolbar.
+  - Interactive inspection modal with tier filtering, search, and jump-to-source in the code editor.
+  - **AI-Powered Auto-Heal**: One-click AI refactoring converting fragile selectors into robust, accessible Playwright locators with a before/after diff preview and one-click disk persistence.
 - **Visual Execution Modes**:
   - **Headless**: Maximum CI/CD speed.
   - **Visible Browser (Slow-Mo)**: Headed browser execution with 500ms delay per action for visual verification.

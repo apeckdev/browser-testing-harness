@@ -15,6 +15,7 @@ builder.Services.Configure<HarnessConfig>(builder.Configuration.GetSection(Harne
 builder.Services.AddSingleton<IChatClientFactory, ChatClientFactory>();
 builder.Services.AddSingleton<IStepCatalogService, StepCatalogService>();
 builder.Services.AddSingleton<IScenarioOutlineService, ScenarioOutlineService>();
+builder.Services.AddSingleton<ILocatorHealthService, LocatorHealthService>();
 builder.Services.AddScoped<IMcpAgentService, McpAgentService>();
 builder.Services.AddSingleton<ITestRunnerService, TestRunnerService>();
 

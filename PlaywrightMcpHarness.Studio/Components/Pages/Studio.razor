@@ -6,6 +6,7 @@
 @inject ITestRunnerService TestRunner
 @inject IStepCatalogService StepCatalog
 @inject IScenarioOutlineService ScenarioOutlineService
+@inject ILocatorHealthService LocatorHealthService
 @inject IOptions<HarnessConfig> ConfigOptions
 @inject IJSRuntime JS
 
@@ -317,6 +318,15 @@
                                 <i class="bi bi-collection"></i>
                                 <span class="d-none d-sm-inline" style="font-size: 0.75rem;">Step Catalog</span>
                                 <span class="badge bg-info bg-opacity-25 text-info rounded-pill px-1" style="font-size: 0.7rem;">@StepCatalog.Steps.Count</span>
+                            </button>
+
+                            <!-- Locator Health & Best Practices Linter Button -->
+                            <button class="btn btn-sm d-flex align-items-center gap-1 py-0 px-2 text-nowrap @GetLocatorHealthButtonClass()"
+                                    title="Inspect Playwright locator resilience, linter findings, and auto-heal fragile selectors"
+                                    @onclick="OpenLocatorHealthModal">
+                                <i class="bi @GetLocatorHealthIconClass()"></i>
+                                <span class="d-none d-sm-inline" style="font-size: 0.75rem;">Locator Health</span>
+                                <span class="badge @GetLocatorHealthBadgeClass() rounded-pill px-1" style="font-size: 0.7rem;">@(_locatorReport?.OverallScore ?? 100)% (@(_locatorReport?.HealthGrade ?? "A+"))</span>
                             </button>
 
                             @if (_selectedFilePath.EndsWith(".feature", StringComparison.OrdinalIgnoreCase))
@@ -1052,6 +1062,301 @@
     </div>
 }
 
+<!-- Modal: Playwright Locator Health & Best Practices Linter -->
+@if (_showLocatorHealthModal)
+{
+    <div class="modal fade show d-block" tabindex="-1" style="background-color: rgba(0,0,0,0.8); z-index: 1056;" @onclick="CloseLocatorHealthModal">
+        <div class="modal-dialog modal-xl modal-dialog-centered modal-dialog-scrollable" @onclick:stopPropagation>
+            <div class="modal-content bg-dark text-light border border-secondary shadow-lg">
+                <!-- Header -->
+                <div class="modal-header border-secondary border-opacity-50 py-2 d-flex justify-content-between align-items-center">
+                    <div class="d-flex align-items-center gap-2">
+                        <i class="bi @GetLocatorHealthIconClass() fs-5"></i>
+                        <div>
+                            <h6 class="modal-title mb-0 fw-semibold">Playwright Locator Health & Best Practices Linter</h6>
+                            <div class="text-secondary" style="font-size: 0.75rem;">
+                                Automated static analysis against official Playwright user-facing locator principles
+                            </div>
+                        </div>
+                    </div>
+                    <div class="d-flex align-items-center gap-2">
+                        <button type="button" class="btn btn-xs btn-outline-info d-flex align-items-center gap-1"
+                                title="Re-scan step definition files"
+                                @onclick="RefreshLocatorHealth">
+                            <i class="bi bi-arrow-repeat"></i> Re-Scan Suite
+                        </button>
+                        <button type="button" class="btn-close btn-close-white" @onclick="CloseLocatorHealthModal"></button>
+                    </div>
+                </div>
+
+                <!-- Modal Body -->
+                <div class="modal-body p-3 d-flex flex-column gap-3">
+                    <!-- Top Metric Cards -->
+                    <div class="row g-2">
+                        <!-- Score Card -->
+                        <div class="col-md-3">
+                            <div class="bg-black bg-opacity-40 p-3 rounded border border-secondary border-opacity-25 d-flex align-items-center justify-content-between h-100">
+                                <div>
+                                    <div class="text-secondary small fw-semibold text-uppercase">Suite Health Score</div>
+                                    <div class="d-flex align-items-baseline gap-2 mt-1">
+                                        <span class="fs-3 fw-bold @GetLocatorHealthTextColor()">@(_locatorReport?.OverallScore ?? 100)%</span>
+                                        <span class="badge @GetLocatorHealthBadgeClass() fs-6">Grade @(_locatorReport?.HealthGrade ?? "A+")</span>
+                                    </div>
+                                    <div class="small text-secondary mt-1" style="font-size: 0.72rem;">
+                                        @(_locatorReport?.TotalLocators ?? 0) total locators inspected
+                                    </div>
+                                </div>
+                                <i class="bi @GetLocatorHealthIconClass() display-6 @GetLocatorHealthTextColor() opacity-75"></i>
+                            </div>
+                        </div>
+
+                        <!-- Resilient Card -->
+                        <div class="col-md-3">
+                            <div class="bg-black bg-opacity-40 p-3 rounded border border-success border-opacity-25 d-flex align-items-center justify-content-between h-100">
+                                <div>
+                                    <div class="text-success small fw-semibold text-uppercase">
+                                        <i class="bi bi-check-circle-fill me-1"></i>Resilient
+                                    </div>
+                                    <div class="fs-3 fw-bold text-light mt-1">@(_locatorReport?.ResilientCount ?? 0)</div>
+                                    <div class="small text-secondary mt-1" style="font-size: 0.72rem;">
+                                        GetByRole, GetByLabel, GetByTestId
+                                    </div>
+                                </div>
+                                <span class="badge bg-success bg-opacity-25 text-success border border-success border-opacity-50 fs-6">
+                                    @(GetPercentage(_locatorReport?.ResilientCount ?? 0, _locatorReport?.TotalLocators ?? 0))%
+                                </span>
+                            </div>
+                        </div>
+
+                        <!-- Caution Card -->
+                        <div class="col-md-3">
+                            <div class="bg-black bg-opacity-40 p-3 rounded border border-warning border-opacity-25 d-flex align-items-center justify-content-between h-100">
+                                <div>
+                                    <div class="text-warning small fw-semibold text-uppercase">
+                                        <i class="bi bi-exclamation-triangle-fill me-1"></i>Caution / Warning
+                                    </div>
+                                    <div class="fs-3 fw-bold text-light mt-1">@(_locatorReport?.CautionCount ?? 0)</div>
+                                    <div class="small text-secondary mt-1" style="font-size: 0.72rem;">
+                                        #id, attribute selectors
+                                    </div>
+                                </div>
+                                <span class="badge bg-warning bg-opacity-25 text-warning border border-warning border-opacity-50 fs-6">
+                                    @(GetPercentage(_locatorReport?.CautionCount ?? 0, _locatorReport?.TotalLocators ?? 0))%
+                                </span>
+                            </div>
+                        </div>
+
+                        <!-- Fragile Card -->
+                        <div class="col-md-3">
+                            <div class="bg-black bg-opacity-40 p-3 rounded border border-danger border-opacity-25 d-flex align-items-center justify-content-between h-100">
+                                <div>
+                                    <div class="text-danger small fw-semibold text-uppercase">
+                                        <i class="bi bi-x-circle-fill me-1"></i>Fragile / Antipattern
+                                    </div>
+                                    <div class="fs-3 fw-bold text-light mt-1">@(_locatorReport?.FragileCount ?? 0)</div>
+                                    <div class="small text-secondary mt-1" style="font-size: 0.72rem;">
+                                        :nth-child, XPath, bare tags
+                                    </div>
+                                </div>
+                                <span class="badge bg-danger bg-opacity-25 text-danger border border-danger border-opacity-50 fs-6">
+                                    @(GetPercentage(_locatorReport?.FragileCount ?? 0, _locatorReport?.TotalLocators ?? 0))%
+                                </span>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Filter Bar & Search -->
+                    <div class="d-flex align-items-center justify-content-between gap-2 flex-wrap">
+                        <div class="btn-group btn-group-sm" role="group">
+                            <button type="button" class="btn @(_locatorTierFilter == null ? "btn-info" : "btn-outline-secondary")"
+                                    @onclick="() => _locatorTierFilter = null">
+                                All (@(_locatorReport?.TotalLocators ?? 0))
+                            </button>
+                            <button type="button" class="btn @(_locatorTierFilter == LocatorHealthTier.Fragile ? "btn-danger" : "btn-outline-danger")"
+                                    @onclick="() => _locatorTierFilter = LocatorHealthTier.Fragile">
+                                <i class="bi bi-x-circle me-1"></i>Fragile Only (@(_locatorReport?.FragileCount ?? 0))
+                            </button>
+                            <button type="button" class="btn @(_locatorTierFilter == LocatorHealthTier.Caution ? "btn-warning" : "btn-outline-warning")"
+                                    @onclick="() => _locatorTierFilter = LocatorHealthTier.Caution">
+                                <i class="bi bi-exclamation-triangle me-1"></i>Caution (@(_locatorReport?.CautionCount ?? 0))
+                            </button>
+                            <button type="button" class="btn @(_locatorTierFilter == LocatorHealthTier.Resilient ? "btn-success" : "btn-outline-success")"
+                                    @onclick="() => _locatorTierFilter = LocatorHealthTier.Resilient">
+                                <i class="bi bi-check-circle me-1"></i>Resilient (@(_locatorReport?.ResilientCount ?? 0))
+                            </button>
+                        </div>
+
+                        <div class="input-group input-group-sm" style="width: 260px;">
+                            <span class="input-group-text bg-dark text-secondary border-secondary border-opacity-50">
+                                <i class="bi bi-search"></i>
+                            </span>
+                            <input type="text" class="form-control bg-dark text-light border-secondary border-opacity-50"
+                                   placeholder="Filter by file, method, or selector..."
+                                   @bind="_locatorSearchQuery"
+                                   @bind:event="oninput" />
+                        </div>
+                    </div>
+
+                    <!-- Findings Table -->
+                    <div class="border border-secondary border-opacity-25 rounded overflow-hidden" style="max-height: 400px; overflow-y: auto;">
+                        <table class="table table-dark table-hover table-sm mb-0 align-middle" style="font-size: 0.82rem;">
+                            <thead class="table-dark sticky-top border-bottom border-secondary border-opacity-50 text-secondary small">
+                                <tr>
+                                    <th style="width: 110px;">Health Tier</th>
+                                    <th style="width: 180px;">Source File & Step</th>
+                                    <th>Locator Expression</th>
+                                    <th>Linter Diagnostic & Best Practice</th>
+                                    <th style="width: 120px;" class="text-end">Actions</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                @if (FilteredLocatorFindings.Count == 0)
+                                {
+                                    <tr>
+                                        <td colspan="5" class="text-center py-4 text-secondary">
+                                            <i class="bi bi-shield-check display-6 d-block mb-2 text-success opacity-50"></i>
+                                            No locators match the selected filter.
+                                        </td>
+                                    </tr>
+                                }
+                                else
+                                {
+                                    @foreach (var finding in FilteredLocatorFindings)
+                                    {
+                                        <tr>
+                                            <td>
+                                                <span class="badge @GetFindingBadgeClass(finding.HealthTier) d-inline-flex align-items-center gap-1" style="font-size: 0.72rem;">
+                                                    <i class="bi @GetFindingIconClass(finding.HealthTier)"></i>
+                                                    @finding.HealthTier (@finding.HealthScore)
+                                                </span>
+                                            </td>
+                                            <td>
+                                                <div class="fw-semibold text-info" role="button" @onclick="() => NavigateToFindingFile(finding)" title="Open in editor">
+                                                    @finding.SourceFile:L@($"{finding.LineNumber}")
+                                                </div>
+                                                <div class="small text-secondary text-truncate" style="max-width: 170px;" title="@finding.MethodName">
+                                                    @finding.MethodName
+                                                </div>
+                                            </td>
+                                            <td>
+                                                <code class="text-warning font-monospace" style="font-size: 0.78rem;">@finding.RawExpression</code>
+                                                <div class="text-secondary small" style="font-size: 0.72rem;">Type: @finding.LocatorType</div>
+                                            </td>
+                                            <td>
+                                                <div class="text-light small">@finding.IssueReason</div>
+                                                <div class="text-info small mt-1">
+                                                    <i class="bi bi-lightbulb me-1 text-warning"></i>@finding.Recommendation
+                                                </div>
+                                            </td>
+                                            <td class="text-end">
+                                                @if (finding.HealthTier != LocatorHealthTier.Resilient)
+                                                {
+                                                    <button type="button" class="btn btn-xs btn-outline-warning d-inline-flex align-items-center gap-1"
+                                                            title="Auto-heal this locator using AI refactoring"
+                                                            @onclick="() => OpenAutoHealForFinding(finding)">
+                                                        <i class="bi bi-magic"></i> Auto-Heal
+                                                    </button>
+                                                }
+                                                else
+                                                {
+                                                    <span class="text-success small"><i class="bi bi-check-all"></i> Healthy</span>
+                                                }
+                                            </td>
+                                        </tr>
+                                    }
+                                }
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+
+                <!-- Footer -->
+                <div class="modal-footer border-secondary border-opacity-50 py-2 d-flex justify-content-between align-items-center">
+                    <div class="small text-secondary">
+                        Playwright Best Practices: Prioritize <strong class="text-light">GetByRole</strong>, <strong class="text-light">GetByLabel</strong>, and semantic accessibility contracts.
+                    </div>
+                    <button type="button" class="btn btn-sm btn-secondary" @onclick="CloseLocatorHealthModal">Close</button>
+                </div>
+            </div>
+        </div>
+    </div>
+}
+
+<!-- Modal: AI Auto-Heal Locator Refactor -->
+@if (_showAutoHealModal && _activeAutoHealFinding != null)
+{
+    <div class="modal fade show d-block" tabindex="-1" style="background-color: rgba(0,0,0,0.85); z-index: 1058;" @onclick="CloseAutoHealModal">
+        <div class="modal-dialog modal-lg modal-dialog-centered" @onclick:stopPropagation>
+            <div class="modal-content bg-dark text-light border border-warning shadow-lg">
+                <div class="modal-header border-secondary border-opacity-50 py-2 d-flex justify-content-between align-items-center">
+                    <div class="d-flex align-items-center gap-2">
+                        <i class="bi bi-magic text-warning fs-5"></i>
+                        <h6 class="modal-title mb-0 fw-semibold">Auto-Heal Locator with AI</h6>
+                    </div>
+                    <button type="button" class="btn-close btn-close-white" @onclick="CloseAutoHealModal"></button>
+                </div>
+
+                <div class="modal-body p-3 d-flex flex-column gap-3">
+                    <div class="alert alert-secondary py-2 px-3 small mb-0 border-secondary border-opacity-25 bg-black bg-opacity-30">
+                        <div class="d-flex align-items-center justify-content-between mb-1">
+                            <span class="fw-semibold text-warning">Target: @_activeAutoHealFinding.SourceFile (Line @_activeAutoHealFinding.LineNumber)</span>
+                            <span class="badge @GetFindingBadgeClass(_activeAutoHealFinding.HealthTier)">@_activeAutoHealFinding.HealthTier</span>
+                        </div>
+                        <div class="text-secondary">Current Locator: <code class="text-warning font-monospace">@_activeAutoHealFinding.RawExpression</code></div>
+                        <div class="text-light mt-1">Issue: @_activeAutoHealFinding.IssueReason</div>
+                    </div>
+
+                    @if (_isAutoHealing)
+                    {
+                        <div class="d-flex flex-column align-items-center justify-content-center p-4 bg-black bg-opacity-40 rounded border border-warning border-opacity-25 text-center" style="min-height: 200px;">
+                            <div class="spinner-border text-warning mb-2" role="status"></div>
+                            <div class="fw-semibold text-warning">Synthesizing Resilient Playwright Locator...</div>
+                            <div class="small text-secondary">Analyzing method structure and identifying accessible user-facing role/label</div>
+                        </div>
+                    }
+                    else if (_autoHealResponse != null && _autoHealResponse.Success)
+                    {
+                        <div>
+                            <label class="form-label small fw-semibold text-success mb-1">
+                                <i class="bi bi-check-circle me-1"></i>Refactored Method Preview (Playwright Best Practice):
+                            </label>
+                            <pre class="bg-black p-3 rounded text-info font-monospace small mb-2 border border-success border-opacity-50" style="max-height: 220px; overflow-y: auto; font-size: 0.8rem;">@_autoHealResponse.RefactoredMethodCode</pre>
+                            @if (!string.IsNullOrWhiteSpace(_autoHealResponse.Explanation))
+                            {
+                                <div class="small text-secondary bg-black bg-opacity-30 p-2 rounded border border-secondary border-opacity-25">
+                                    <strong class="text-light">Why this is more resilient:</strong> @_autoHealResponse.Explanation
+                                </div>
+                            }
+                        </div>
+                    }
+                    else if (!string.IsNullOrEmpty(_autoHealErrorMessage))
+                    {
+                        <div class="alert alert-danger py-2 px-3 small mb-0">
+                            <i class="bi bi-exclamation-triangle me-1"></i>@_autoHealErrorMessage
+                        </div>
+                    }
+                </div>
+
+                <div class="modal-footer border-secondary border-opacity-50 py-2 d-flex justify-content-between align-items-center">
+                    <button type="button" class="btn btn-sm btn-outline-warning" @onclick="TriggerAutoHeal" disabled="@_isAutoHealing">
+                        <i class="bi bi-arrow-repeat"></i> Regenerate
+                    </button>
+                    <div class="d-flex align-items-center gap-2">
+                        @if (_autoHealResponse != null && _autoHealResponse.Success)
+                        {
+                            <button type="button" class="btn btn-sm btn-success d-flex align-items-center gap-1"
+                                    @onclick="ApplyAutoHealRefactor">
+                                <i class="bi bi-check2-circle"></i> Apply Fix to Step Definition
+                            </button>
+                        }
+                        <button type="button" class="btn btn-sm btn-secondary" @onclick="CloseAutoHealModal">Cancel</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+}
+
 <style>
     .cursor-blink {
         display: inline-block;
@@ -1182,6 +1487,208 @@
         }
         catch { }
     }
+
+    private bool _showLocatorHealthModal;
+    private LocatorHealthReport? _locatorReport;
+    private LocatorHealthTier? _locatorTierFilter;
+    private string _locatorSearchQuery = "";
+
+    private bool _showAutoHealModal;
+    private LocatorFinding? _activeAutoHealFinding;
+    private bool _isAutoHealing;
+    private AutoHealResponse? _autoHealResponse;
+    private string? _autoHealErrorMessage;
+    private CancellationTokenSource? _autoHealCts;
+
+    private List<LocatorFinding> FilteredLocatorFindings
+    {
+        get
+        {
+            if (_locatorReport == null) return new();
+            var list = _locatorReport.Findings.AsEnumerable();
+            if (_locatorTierFilter.HasValue)
+            {
+                list = list.Where(f => f.HealthTier == _locatorTierFilter.Value);
+            }
+            if (!string.IsNullOrWhiteSpace(_locatorSearchQuery))
+            {
+                var q = _locatorSearchQuery.Trim();
+                list = list.Where(f =>
+                    f.SourceFile.Contains(q, StringComparison.OrdinalIgnoreCase) ||
+                    f.MethodName.Contains(q, StringComparison.OrdinalIgnoreCase) ||
+                    f.RawExpression.Contains(q, StringComparison.OrdinalIgnoreCase) ||
+                    f.IssueReason.Contains(q, StringComparison.OrdinalIgnoreCase));
+            }
+            return list.ToList();
+        }
+    }
+
+    private void OpenLocatorHealthModal()
+    {
+        _locatorTierFilter = null;
+        _locatorSearchQuery = "";
+        _showLocatorHealthModal = true;
+    }
+
+    private void CloseLocatorHealthModal()
+    {
+        _showLocatorHealthModal = false;
+    }
+
+    private async Task RefreshLocatorHealth()
+    {
+        _locatorReport = await LocatorHealthService.AnalyzeTestSuiteLocatorsAsync(forceReload: true);
+        _statusText = $"Re-scanned locator health: {_locatorReport.OverallScore}% ({_locatorReport.HealthGrade})";
+        StateHasChanged();
+    }
+
+    private async Task NavigateToFindingFile(LocatorFinding finding)
+    {
+        _showLocatorHealthModal = false;
+        var match = _testFiles.FirstOrDefault(f =>
+            f.FileName.Equals(finding.SourceFile, StringComparison.OrdinalIgnoreCase) ||
+            f.RelativePath.EndsWith(finding.SourceFile, StringComparison.OrdinalIgnoreCase));
+        if (match != null)
+        {
+            _selectedFilePath = match.RelativePath;
+            _currentFileContent = match.Content;
+            await SyncEditorToCurrentFileAsync();
+            _statusText = $"Opened {finding.SourceFile} at line {finding.LineNumber} ({finding.MethodName})";
+        }
+    }
+
+    private async Task OpenAutoHealForFinding(LocatorFinding finding)
+    {
+        _activeAutoHealFinding = finding;
+        _autoHealResponse = null;
+        _autoHealErrorMessage = null;
+        _showAutoHealModal = true;
+        await TriggerAutoHeal();
+    }
+
+    private void CloseAutoHealModal()
+    {
+        _autoHealCts?.Cancel();
+        _isAutoHealing = false;
+        _showAutoHealModal = false;
+    }
+
+    private async Task TriggerAutoHeal()
+    {
+        if (_activeAutoHealFinding == null) return;
+
+        _isAutoHealing = true;
+        _autoHealErrorMessage = null;
+        _autoHealResponse = null;
+        _autoHealCts = new CancellationTokenSource();
+
+        try
+        {
+            var req = new AutoHealRequest
+            {
+                Finding = _activeAutoHealFinding
+            };
+
+            var res = await LocatorHealthService.AutoHealLocatorAsync(
+                req,
+                _selectedProviderKey,
+                _currentProviderOverride,
+                _autoHealCts.Token);
+
+            if (res.Success)
+            {
+                _autoHealResponse = res;
+            }
+            else
+            {
+                _autoHealErrorMessage = res.ErrorMessage;
+            }
+        }
+        catch (Exception ex)
+        {
+            _autoHealErrorMessage = ex.Message;
+        }
+        finally
+        {
+            _isAutoHealing = false;
+            _autoHealCts?.Dispose();
+            _autoHealCts = null;
+            await InvokeAsync(StateHasChanged);
+        }
+    }
+
+    private async Task ApplyAutoHealRefactor()
+    {
+        if (_activeAutoHealFinding == null || _autoHealResponse == null || !_autoHealResponse.Success) return;
+
+        try
+        {
+            var res = await LocatorHealthService.ApplyLocatorRefactorAsync(
+                _activeAutoHealFinding.RelativePath,
+                _autoHealResponse.OriginalMethodCode,
+                _autoHealResponse.RefactoredMethodCode);
+
+            _statusText = res;
+            _showAutoHealModal = false;
+            await RefreshTestFiles();
+            _locatorReport = await LocatorHealthService.AnalyzeTestSuiteLocatorsAsync(forceReload: true);
+        }
+        catch (Exception ex)
+        {
+            _autoHealErrorMessage = $"Failed to apply refactor: {ex.Message}";
+        }
+    }
+
+    private string GetLocatorHealthButtonClass()
+    {
+        var score = _locatorReport?.OverallScore ?? 100;
+        if (score >= 90) return "btn-outline-success";
+        if (score >= 75) return "btn-outline-warning";
+        return "btn-outline-danger";
+    }
+
+    private string GetLocatorHealthBadgeClass()
+    {
+        var score = _locatorReport?.OverallScore ?? 100;
+        if (score >= 90) return "bg-success bg-opacity-25 text-success border border-success border-opacity-50";
+        if (score >= 75) return "bg-warning bg-opacity-25 text-warning border border-warning border-opacity-50";
+        return "bg-danger bg-opacity-25 text-danger border border-danger border-opacity-50";
+    }
+
+    private string GetLocatorHealthIconClass()
+    {
+        var score = _locatorReport?.OverallScore ?? 100;
+        if (score >= 90) return "bi-shield-check text-success";
+        if (score >= 75) return "bi-shield-exclamation text-warning";
+        return "bi-shield-slash text-danger";
+    }
+
+    private string GetLocatorHealthTextColor()
+    {
+        var score = _locatorReport?.OverallScore ?? 100;
+        if (score >= 90) return "text-success";
+        if (score >= 75) return "text-warning";
+        return "text-danger";
+    }
+
+    private string GetFindingBadgeClass(LocatorHealthTier tier) => tier switch
+    {
+        LocatorHealthTier.Resilient => "bg-success bg-opacity-25 text-success border border-success border-opacity-50",
+        LocatorHealthTier.Caution => "bg-warning bg-opacity-25 text-warning border border-warning border-opacity-50",
+        LocatorHealthTier.Fragile => "bg-danger bg-opacity-25 text-danger border border-danger border-opacity-50",
+        _ => "bg-secondary text-light"
+    };
+
+    private string GetFindingIconClass(LocatorHealthTier tier) => tier switch
+    {
+        LocatorHealthTier.Resilient => "bi-check-circle-fill",
+        LocatorHealthTier.Caution => "bi-exclamation-triangle-fill",
+        LocatorHealthTier.Fragile => "bi-x-circle-fill",
+        _ => "bi-circle"
+    };
+
+    private static int GetPercentage(int part, int total) =>
+        total > 0 ? (int)Math.Round((double)part * 100 / total) : 0;
 
     private bool _showOutlineModal;
     private List<DetectedScenario> _detectedScenarios = new();
@@ -1629,6 +2136,7 @@
     {
         _testFiles = await AgentService.GetExistingTestFilesAsync();
         await StepCatalog.ScanStepDefinitionsAsync(forceReload: true);
+        _locatorReport = await LocatorHealthService.AnalyzeTestSuiteLocatorsAsync(forceReload: true);
         try
         {
             await JS.InvokeVoidAsync("studioCodeEditor.setStepCatalog", StepCatalog.Steps);
