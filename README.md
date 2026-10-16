@@ -55,6 +55,7 @@ The harness decouples **AI Agent Exploration & Authoring** from **Automated Test
   - Interactive **Step Definition Catalog** modal with real-time search, step type filters, parameter highlighting, and one-click insertion.
   - Line numbers, Material Darker theme, and two-way file saving.
   - Distraction-free **Full Screen View** with one-click expansion and <kbd>Esc</kbd> shortcut.
+  - **Collapsible AI Agent Sidebar**: Collapse the AI exploration chat into a compact vertical status rail to maximize screen real estate for the CodeMirror editor and Test Runner console.
   - Delete features and step definitions directly within the UI.
 - **Step Definition Intelligence & Deduplication**:
   - Automatically scans and indexes all `[Given]`, `[When]`, `[Then]` regex patterns and method signatures across `StepDefinitions/*.cs`.
