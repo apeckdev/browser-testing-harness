@@ -1,0 +1,7 @@
+<Project>
+  <!-- Automatically sign compiled binaries using local development code-signing certificate to prevent Windows 11 Smart App Control (0x800711C7) blocks -->
+  <Target Name="AutoSignOutputBinaries" AfterTargets="CopyFilesToOutputDirectory" Condition="'$(OS)' == 'Windows_NT'">
+    <Exec Command="powershell.exe -NoProfile -ExecutionPolicy Bypass -Command &quot;$cert = Get-Item Cert:\CurrentUser\My\DBAF987CFBCFB8B00E423443A4C8832F7F109D7F -ErrorAction SilentlyContinue; if (-not $cert) { $cert = Get-ChildItem Cert:\CurrentUser\My -CodeSigningCert -ErrorAction SilentlyContinue | Select-Object -First 1 }; if ($cert) { Set-AuthenticodeSignature -FilePath '$(TargetPath)' -Certificate $cert -ErrorAction SilentlyContinue | Out-Null; $exePath = [System.IO.Path]::ChangeExtension('$(TargetPath)', '.exe'); if (Test-Path $exePath) { Set-AuthenticodeSignature -FilePath $exePath -Certificate $cert -ErrorAction SilentlyContinue | Out-Null } }&quot;"
+          ContinueOnError="true" />
+  </Target>
+</Project>
