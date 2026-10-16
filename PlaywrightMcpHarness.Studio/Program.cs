@@ -13,6 +13,7 @@ builder.Services.Configure<HarnessConfig>(builder.Configuration.GetSection(Harne
 
 // Register AI & Test Harness services
 builder.Services.AddSingleton<IChatClientFactory, ChatClientFactory>();
+builder.Services.AddSingleton<IStepCatalogService, StepCatalogService>();
 builder.Services.AddScoped<IMcpAgentService, McpAgentService>();
 builder.Services.AddSingleton<ITestRunnerService, TestRunnerService>();
 

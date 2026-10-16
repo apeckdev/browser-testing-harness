@@ -50,6 +50,7 @@ public class McpAgentService : IMcpAgentService
 {
     private readonly HarnessConfig _config;
     private readonly IChatClientFactory _chatClientFactory;
+    private readonly IStepCatalogService _stepCatalog;
     private readonly ILogger<McpAgentService> _logger;
     private readonly SemaphoreSlim _connectionLock = new(1, 1);
 
@@ -66,10 +67,12 @@ public class McpAgentService : IMcpAgentService
     public McpAgentService(
         IOptions<HarnessConfig> configOptions,
         IChatClientFactory chatClientFactory,
+        IStepCatalogService stepCatalog,
         ILogger<McpAgentService> logger)
     {
         _config = configOptions.Value;
         _chatClientFactory = chatClientFactory;
+        _stepCatalog = stepCatalog;
         _logger = logger;
 
         InitializeSystemPrompt();
@@ -78,7 +81,9 @@ public class McpAgentService : IMcpAgentService
     private void InitializeSystemPrompt()
     {
         _conversationHistory.Clear();
-        var systemPrompt = @"You are a Principal .NET QA Automation Architect specializing in Playwright and SpecFlow test authoring.
+        var stepCatalogSummary = _stepCatalog.GetCatalogSummaryForPrompt();
+
+        var systemPrompt = $@"You are a Principal .NET QA Automation Architect specializing in Playwright and SpecFlow test authoring.
 You build reliable, production-grade test suites in the PlaywrightMcpHarness.Tests project.
 
 CORE OPERATIONAL RULES:
@@ -87,14 +92,20 @@ CORE OPERATIONAL RULES:
    - Inspect the accessibility snapshot carefully to discover robust, resilient locators and exact text/titles.
 
 2. LOCATOR RESILIENCE & PLAYWRIGHT STRICT MODE:
-   - Prefer user-facing role locators: GetByRole(AriaRole.Button, new() { Name = '...' }), GetByRole(AriaRole.Textbox), etc.
+   - Prefer user-facing role locators: GetByRole(AriaRole.Button, new() {{ Name = '...' }}), GetByRole(AriaRole.Textbox), etc.
    - Avoid brittle CSS selectors or absolute XPath expressions.
-   - When targeting links or buttons that may appear both in header navigation and footer areas, scope them or use '.First' (e.g. GetByRole(AriaRole.Link, new() { Name = ... }).First) to avoid Playwright strict mode violations.
+   - When targeting links or buttons that may appear both in header navigation and footer areas, scope them or use '.First' (e.g. GetByRole(AriaRole.Link, new() {{ Name = ... }}).First) to avoid Playwright strict mode violations.
 
-3. INSPECT EXISTING CODE:
-   - Call the local tool 'ReadExistingTestFiles' before creating new tests so you follow existing naming conventions, namespaces, and step definition patterns.
+3. STEP DEFINITION REUSE (DEDUPLICATION - CRITICAL):
+   - Review the indexed SpecFlow step definitions below before authoring any new C# code.
+   - ALWAYS reuse existing steps in your .feature files whenever an interaction or assertion is already implemented.
+   - For example, reuse 'Given I am on the ""{{pageName}}"" page' or 'When I click the ""{{buttonName}}"" button' rather than generating duplicate C# methods.
+   - Only write a new StepDefinition class or method when the test requires an interaction or assertion NOT covered by existing steps.
 
-4. SPECFLOW FEATURE AUTHORING:
+4. INSPECT EXISTING CODE:
+   - Call the local tool 'ReadExistingTestFiles' or 'GetExistingStepCatalog' before creating new tests so you follow existing naming conventions, namespaces, and step definition patterns.
+
+5. SPECFLOW FEATURE AUTHORING:
    - Call the local tool 'SaveFeatureFile' with a descriptive file name (e.g. 'Todo.feature', 'Cart.feature') and valid Gherkin syntax:
      Feature: ...
        Scenario: ...
@@ -103,7 +114,7 @@ CORE OPERATIONAL RULES:
          Then ...
    - Saving a feature file automatically triggers dotnet build to compile and generate SpecFlow code-behind.
 
-5. C# STEP DEFINITION AUTHORING:
+6. C# STEP DEFINITION AUTHORING:
    - Call the local tool 'SaveStepDefinitionFile' with a matching C# filename (e.g. 'TodoSteps.cs', 'CartSteps.cs').
    - Use 'TechTalk.SpecFlow' and 'Microsoft.Playwright'.
    - Decorate class with [Binding].
@@ -112,8 +123,10 @@ CORE OPERATIONAL RULES:
    - Use async Task for all step methods.
    - IMPORTANT: DO NOT invent non-existent types or exceptions like 'ScenarioContext.ScenarioContextInjectionException'. Always use standard .NET exceptions such as 'System.ArgumentException' or 'System.NotSupportedException' if a switch case is unhandled.
 
-6. FINAL SUMMARY:
-   - Conclude your answer with a clear summary of the steps created, the resilient locators chosen, and confirmation that tests are ready for visual execution in the Studio.";
+7. FINAL SUMMARY:
+   - Conclude your answer with a clear summary of the steps created, which existing steps were reused, and confirmation that tests are ready for visual execution in the Studio.
+
+{stepCatalogSummary}";
 
         _conversationHistory.Add(new ChatMessage(ChatRole.System, systemPrompt));
     }
@@ -535,7 +548,16 @@ CORE OPERATIONAL RULES:
         var relPath = Path.Combine("StepDefinitions", safeName);
         OnFileSaved?.Invoke(relPath);
 
+        // Re-scan catalog asynchronously so new steps are immediately indexed
+        _ = _stepCatalog.ScanStepDefinitionsAsync(forceReload: true);
+
         return $"Successfully wrote {safeName} into StepDefinitions/ directory.";
+    }
+
+    private string ToolGetExistingStepCatalog()
+    {
+        OnStatusUpdate?.Invoke("Executing Tool: GetExistingStepCatalog...");
+        return _stepCatalog.GetCatalogSummaryForPrompt();
     }
 
     public async Task<string> ExecutePromptAsync(
@@ -562,11 +584,16 @@ CORE OPERATIONAL RULES:
             allTools.Add(new ObservableAIFunction(mcpTool, name => OnStatusUpdate?.Invoke($"Executing MCP Tool: {name}...")));
         }
 
-        // Add 3 custom local file-system tools
+        // Add custom local tools
         var readTool = AIFunctionFactory.Create(
             ToolReadExistingTestFiles,
             "ReadExistingTestFiles",
             "Lists and returns the contents of all .feature and *Steps.cs files in the PlaywrightMcpHarness.Tests project.");
+
+        var catalogTool = AIFunctionFactory.Create(
+            ToolGetExistingStepCatalog,
+            "GetExistingStepCatalog",
+            "Returns the catalog of all currently indexed SpecFlow step definitions with parameters, to help you reuse existing steps.");
 
         var saveFeatureTool = AIFunctionFactory.Create(
             ToolSaveFeatureFileAsync,
@@ -579,6 +606,7 @@ CORE OPERATIONAL RULES:
             "Writes/updates a *Steps.cs file in PlaywrightMcpHarness.Tests/StepDefinitions.");
 
         allTools.Add(new ObservableAIFunction(readTool, name => OnStatusUpdate?.Invoke($"Executing Local Tool: {name}...")));
+        allTools.Add(new ObservableAIFunction(catalogTool, name => OnStatusUpdate?.Invoke($"Executing Local Tool: {name}...")));
         allTools.Add(new ObservableAIFunction(saveFeatureTool, name => OnStatusUpdate?.Invoke($"Executing Local Tool: {name}...")));
         allTools.Add(new ObservableAIFunction(saveStepTool, name => OnStatusUpdate?.Invoke($"Executing Local Tool: {name}...")));
 

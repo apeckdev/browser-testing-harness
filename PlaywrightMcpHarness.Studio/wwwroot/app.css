@@ -142,3 +142,56 @@ h1:focus {
     color: #38bdf8 !important; /* Table borders | */
 }
 
+/* CodeMirror Hint / Autocomplete Dark Theme */
+.CodeMirror-hints {
+    position: absolute;
+    z-index: 100000;
+    overflow: hidden;
+    list-style: none;
+    margin: 0;
+    padding: 6px;
+    border-radius: 8px;
+    border: 1px solid rgba(255, 255, 255, 0.14) !important;
+    background: #181b22 !important;
+    box-shadow: 0 12px 30px rgba(0, 0, 0, 0.7), 0 0 1px rgba(255, 255, 255, 0.12);
+    font-family: 'JetBrains Mono', Consolas, monospace !important;
+    font-size: 0.82rem;
+    max-height: 280px;
+    overflow-y: auto;
+}
+
+.CodeMirror-hint {
+    margin: 2px 0;
+    padding: 6px 10px;
+    border-radius: 5px;
+    white-space: pre;
+    color: #cbd5e1 !important;
+    cursor: pointer;
+    transition: background 0.1s ease;
+}
+
+li.CodeMirror-hint-active {
+    background: #2563eb !important;
+    color: #ffffff !important;
+}
+
+.cm-step-hint {
+    font-size: 0.82rem;
+}
+
+.cm-step-given {
+    color: #4ade80 !important;
+}
+
+.cm-step-when {
+    color: #38bdf8 !important;
+}
+
+.cm-step-then {
+    color: #c084fc !important;
+}
+
+.cm-step-stepdefinition {
+    color: #facc15 !important;
+}
+

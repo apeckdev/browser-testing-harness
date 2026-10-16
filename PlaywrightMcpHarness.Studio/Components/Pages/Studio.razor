@@ -4,6 +4,7 @@
 @implements IDisposable
 @inject IMcpAgentService AgentService
 @inject ITestRunnerService TestRunner
+@inject IStepCatalogService StepCatalog
 @inject IOptions<HarnessConfig> ConfigOptions
 @inject IJSRuntime JS
 
@@ -307,6 +308,15 @@
                                     <i class="bi bi-trash"></i> Delete
                                 </button>
                             }
+
+                            <!-- Step Catalog Button -->
+                            <button class="btn btn-sm btn-outline-info d-flex align-items-center gap-1 py-0 px-2 text-nowrap"
+                                    title="Explore and insert reusable SpecFlow step definitions"
+                                    @onclick="OpenStepCatalogModal">
+                                <i class="bi bi-collection"></i>
+                                <span class="d-none d-sm-inline" style="font-size: 0.75rem;">Step Catalog</span>
+                                <span class="badge bg-info bg-opacity-25 text-info rounded-pill px-1" style="font-size: 0.7rem;">@StepCatalog.Steps.Count</span>
+                            </button>
 
                             <!-- Full Screen Toggle Button -->
                             <button class="btn btn-sm btn-outline-secondary d-flex align-items-center gap-1 py-0 px-2"
@@ -652,6 +662,147 @@
     </div>
 }
 
+<!-- Modal: Step Definition Catalog & Reusability Library -->
+@if (_showStepCatalogModal)
+{
+    <div class="modal fade show d-block" tabindex="-1" style="background-color: rgba(0,0,0,0.8); z-index: 1055;" @onclick="CloseStepCatalogModal">
+        <div class="modal-dialog modal-lg modal-dialog-centered modal-dialog-scrollable" @onclick:stopPropagation>
+            <div class="modal-content bg-dark text-light border border-secondary shadow-lg">
+                <!-- Header -->
+                <div class="modal-header border-secondary border-opacity-50 py-2 d-flex justify-content-between align-items-center">
+                    <div class="d-flex align-items-center gap-2">
+                        <i class="bi bi-collection-fill text-info fs-5"></i>
+                        <div>
+                            <h6 class="modal-title mb-0 fw-semibold">SpecFlow Step Definition Catalog</h6>
+                            <div class="text-secondary" style="font-size: 0.75rem;">
+                                Reusable steps indexed across test suite &bull; Live autocomplete enabled in editor
+                            </div>
+                        </div>
+                    </div>
+                    <div class="d-flex align-items-center gap-2">
+                        <button type="button" class="btn btn-xs btn-outline-secondary d-flex align-items-center gap-1" @onclick="RefreshStepCatalog" title="Re-scan step definition files">
+                            <i class="bi bi-arrow-repeat"></i> Rescan
+                        </button>
+                        <button type="button" class="btn-close btn-close-white" @onclick="CloseStepCatalogModal"></button>
+                    </div>
+                </div>
+
+                <!-- Search & Filter Controls -->
+                <div class="p-3 border-bottom border-secondary border-opacity-25 bg-black bg-opacity-25">
+                    <div class="row g-2 align-items-center">
+                        <div class="col">
+                            <div class="input-group input-group-sm">
+                                <span class="input-group-text bg-dark border-secondary border-opacity-50 text-secondary">
+                                    <i class="bi bi-search"></i>
+                                </span>
+                                <input type="text" class="form-control bg-dark text-light border-secondary border-opacity-50"
+                                       placeholder="Search step pattern, method name, or file..."
+                                       @bind="_stepSearchQuery"
+                                       @bind:event="oninput" />
+                                @if (!string.IsNullOrWhiteSpace(_stepSearchQuery))
+                                {
+                                    <button class="btn btn-outline-secondary border-secondary border-opacity-50" type="button" @onclick='() => _stepSearchQuery = ""'>
+                                        <i class="bi bi-x"></i>
+                                    </button>
+                                }
+                            </div>
+                        </div>
+                        <div class="col-auto">
+                            <div class="btn-group btn-group-sm" role="group">
+                                <button type="button" class="btn @(_stepFilterType == "All" ? "btn-primary" : "btn-outline-secondary")" @onclick='() => _stepFilterType = "All"'>
+                                    All (@StepCatalog.Steps.Count)
+                                </button>
+                                <button type="button" class="btn @(_stepFilterType == "Given" ? "btn-success" : "btn-outline-secondary")" @onclick='() => _stepFilterType = "Given"'>
+                                    Given (@StepCatalog.Steps.Count(s => s.StepType == "Given"))
+                                </button>
+                                <button type="button" class="btn @(_stepFilterType == "When" ? "btn-info" : "btn-outline-secondary")" @onclick='() => _stepFilterType = "When"'>
+                                    When (@StepCatalog.Steps.Count(s => s.StepType == "When"))
+                                </button>
+                                <button type="button" class="btn @(_stepFilterType == "Then" ? "btn-warning" : "btn-outline-secondary")" @onclick='() => _stepFilterType = "Then"'>
+                                    Then (@StepCatalog.Steps.Count(s => s.StepType == "Then"))
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Steps List Body -->
+                <div class="modal-body p-3" style="max-height: 60vh; overflow-y: auto;">
+                    @if (!FilteredCatalogSteps.Any())
+                    {
+                        <div class="text-center py-4 text-secondary">
+                            <i class="bi bi-search fs-3 mb-2 d-block"></i>
+                            <span>No step definitions match your search query.</span>
+                        </div>
+                    }
+                    else
+                    {
+                        <div class="d-flex flex-column gap-2">
+                            @foreach (var step in FilteredCatalogSteps)
+                            {
+                                var badgeClass = step.StepType switch
+                                {
+                                    "Given" => "bg-success bg-opacity-25 text-success border border-success border-opacity-50",
+                                    "When" => "bg-info bg-opacity-25 text-info border border-info border-opacity-50",
+                                    "Then" => "bg-warning bg-opacity-25 text-warning border border-warning border-opacity-50",
+                                    _ => "bg-secondary bg-opacity-25 text-secondary border border-secondary border-opacity-50"
+                                };
+
+                                <div class="card bg-black bg-opacity-40 border border-secondary border-opacity-25 p-2 rounded">
+                                    <div class="d-flex align-items-start justify-content-between gap-2">
+                                        <div class="d-flex flex-column gap-1 flex-grow-1">
+                                            <div class="d-flex align-items-center gap-2 flex-wrap">
+                                                <span class="badge @badgeClass fw-bold px-2 py-1" style="font-size: 0.72rem; min-width: 52px; text-align: center;">
+                                                    @step.StepType.ToUpperInvariant()
+                                                </span>
+                                                <span class="font-monospace text-light fw-medium" style="font-size: 0.88rem;">
+                                                    @step.NormalizedPattern
+                                                </span>
+                                            </div>
+                                            <div class="d-flex align-items-center gap-3 text-secondary" style="font-size: 0.75rem;">
+                                                <span><i class="bi bi-file-earmark-code me-1 text-info"></i>@step.SourceFile:@step.LineNumber</span>
+                                                <span><i class="bi bi-code-slash me-1"></i><code>@step.MethodName</code></span>
+                                                @if (step.Parameters.Count > 0)
+                                                {
+                                                    <span>
+                                                        <i class="bi bi-braces me-1"></i>
+                                                        @string.Join(", ", step.Parameters.Select(p => $"{p.Type} {p.Name}"))
+                                                    </span>
+                                                }
+                                            </div>
+                                        </div>
+                                        <div class="d-flex align-items-center gap-1 flex-shrink-0">
+                                            <button class="btn btn-xs btn-outline-primary d-flex align-items-center gap-1"
+                                                    title="Insert into currently open file at cursor"
+                                                    @onclick="() => InsertStepIntoEditor(step)">
+                                                <i class="bi bi-box-arrow-in-down"></i> Insert
+                                            </button>
+                                            <button class="btn btn-xs btn-outline-secondary d-flex align-items-center gap-1"
+                                                    title="Copy Gherkin step to clipboard"
+                                                    @onclick="() => CopyStepToClipboard(step)">
+                                                <i class="bi bi-clipboard"></i> Copy
+                                            </button>
+                                        </div>
+                                    </div>
+                                </div>
+                            }
+                        </div>
+                    }
+                </div>
+
+                <!-- Footer -->
+                <div class="modal-footer border-secondary border-opacity-50 py-2 d-flex justify-content-between">
+                    <span class="text-secondary small" style="font-size: 0.75rem;">
+                        <i class="bi bi-lightbulb text-warning me-1"></i>
+                        Tip: In the editor, type <kbd class="bg-secondary bg-opacity-25 text-light">Given </kbd>, <kbd class="bg-secondary bg-opacity-25 text-light">When </kbd>, or press <kbd class="bg-secondary bg-opacity-25 text-light">Ctrl+Space</kbd> for instant autocomplete.
+                    </span>
+                    <button type="button" class="btn btn-sm btn-secondary" @onclick="CloseStepCatalogModal">Close</button>
+                </div>
+            </div>
+        </div>
+    </div>
+}
+
 <style>
     .cursor-blink {
         display: inline-block;
@@ -712,6 +863,77 @@
 
     private ScenarioResult? _previewScenarioScreenshot;
 
+    private bool _showStepCatalogModal;
+    private string _stepSearchQuery = "";
+    private string _stepFilterType = "All";
+
+    private IEnumerable<StepDefinitionInfo> FilteredCatalogSteps
+    {
+        get
+        {
+            var steps = StepCatalog.Steps.AsEnumerable();
+            if (!string.IsNullOrWhiteSpace(_stepFilterType) && !_stepFilterType.Equals("All", StringComparison.OrdinalIgnoreCase))
+            {
+                steps = steps.Where(s => s.StepType.Equals(_stepFilterType, StringComparison.OrdinalIgnoreCase));
+            }
+            if (!string.IsNullOrWhiteSpace(_stepSearchQuery))
+            {
+                var q = _stepSearchQuery.Trim();
+                steps = steps.Where(s =>
+                    s.NormalizedPattern.Contains(q, StringComparison.OrdinalIgnoreCase) ||
+                    s.MethodName.Contains(q, StringComparison.OrdinalIgnoreCase) ||
+                    s.SourceFile.Contains(q, StringComparison.OrdinalIgnoreCase));
+            }
+            return steps;
+        }
+    }
+
+    private void OpenStepCatalogModal()
+    {
+        _stepSearchQuery = "";
+        _stepFilterType = "All";
+        _showStepCatalogModal = true;
+    }
+
+    private void CloseStepCatalogModal()
+    {
+        _showStepCatalogModal = false;
+    }
+
+    private async Task RefreshStepCatalog()
+    {
+        await StepCatalog.ScanStepDefinitionsAsync(forceReload: true);
+        try
+        {
+            await JS.InvokeVoidAsync("studioCodeEditor.setStepCatalog", StepCatalog.Steps);
+        }
+        catch { }
+        StateHasChanged();
+    }
+
+    private async Task InsertStepIntoEditor(StepDefinitionInfo step)
+    {
+        try
+        {
+            var snippet = $"{step.StepType} {step.AutocompleteSnippet}\n";
+            await JS.InvokeVoidAsync("studioCodeEditor.insertSnippet", snippet);
+            _showStepCatalogModal = false;
+            _statusText = $"Inserted step: {step.FullDisplay}";
+        }
+        catch { }
+    }
+
+    private async Task CopyStepToClipboard(StepDefinitionInfo step)
+    {
+        try
+        {
+            var snippet = $"{step.StepType} {step.AutocompleteSnippet}";
+            await JS.InvokeVoidAsync("navigator.clipboard.writeText", snippet);
+            _statusText = $"Copied to clipboard: {snippet}";
+        }
+        catch { }
+    }
+
     public class ScenarioResult
     {
         public string Name { get; set; } = "";
@@ -740,6 +962,7 @@
         AgentService.OnAgentMessageChunk += HandleAgentMessageChunk;
         AgentService.OnFileSaved += HandleFileSaved;
 
+        await StepCatalog.ScanStepDefinitionsAsync();
         await RefreshTestFiles();
     }
 
@@ -752,6 +975,7 @@
             try
             {
                 await JS.InvokeVoidAsync("studioCodeEditor.init", "studioCodeTextarea", _dotNetRef, mode, _currentFileContent);
+                await JS.InvokeVoidAsync("studioCodeEditor.setStepCatalog", StepCatalog.Steps);
             }
             catch { }
         }
@@ -978,6 +1202,12 @@
     private async Task RefreshTestFiles(string? targetFilePath = null)
     {
         _testFiles = await AgentService.GetExistingTestFilesAsync();
+        await StepCatalog.ScanStepDefinitionsAsync(forceReload: true);
+        try
+        {
+            await JS.InvokeVoidAsync("studioCodeEditor.setStepCatalog", StepCatalog.Steps);
+        }
+        catch { }
 
         if (!string.IsNullOrEmpty(targetFilePath))
         {

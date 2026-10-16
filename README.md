@@ -51,9 +51,14 @@ The harness decouples **AI Agent Exploration & Authoring** from **Automated Test
   - **OpenAI Cloud** (`gpt-4o`)
 - **Integrated Workspace Code Editor**:
   - Offline syntax highlighting for both SpecFlow Gherkin (`.feature`) and C# (`.cs`) step definitions.
+  - Real-time **Gherkin Step Autocomplete** in CodeMirror upon typing `Given `, `When `, `Then `, `And `, or pressing <kbd>Ctrl+Space</kbd>.
+  - Interactive **Step Definition Catalog** modal with real-time search, step type filters, parameter highlighting, and one-click insertion.
   - Line numbers, Material Darker theme, and two-way file saving.
   - Distraction-free **Full Screen View** with one-click expansion and <kbd>Esc</kbd> shortcut.
   - Delete features and step definitions directly within the UI.
+- **Step Definition Intelligence & Deduplication**:
+  - Automatically scans and indexes all `[Given]`, `[When]`, `[Then]` regex patterns and method signatures across `StepDefinitions/*.cs`.
+  - Injects existing step definitions directly into the AI agent prompt and provides a `GetExistingStepCatalog` tool so new tests prioritize reusing existing steps before generating redundant C# bindings.
 - **Visual Execution Modes**:
   - **Headless**: Maximum CI/CD speed.
   - **Visible Browser (Slow-Mo)**: Headed browser execution with 500ms delay per action for visual verification.

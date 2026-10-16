@@ -11,6 +11,7 @@
     <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" />
     <link rel="stylesheet" href="lib/codemirror/codemirror.min.css" />
     <link rel="stylesheet" href="lib/codemirror/material-darker.min.css" />
+    <link rel="stylesheet" href="lib/codemirror/show-hint.min.css" />
     <link rel="stylesheet" href="app.css" />
     <link rel="stylesheet" href="PlaywrightMcpHarness.Studio.styles.css" />
     <link rel="icon" type="image/png" href="favicon.png" />
@@ -24,10 +25,57 @@
     <script src="lib/codemirror/codemirror.min.js"></script>
     <script src="lib/codemirror/clike.min.js"></script>
     <script src="lib/codemirror/gherkin.min.js"></script>
+    <script src="lib/codemirror/show-hint.min.js"></script>
     <script>
         if (window.CodeMirror) {
             CodeMirror.defineMIME("text/x-gherkin", "gherkin");
             CodeMirror.defineMIME("text/x-feature", "gherkin");
+
+            CodeMirror.registerHelper("hint", "gherkin", function (cm) {
+                var cur = cm.getCursor();
+                var line = cm.getLine(cur.line);
+                var lineToCursor = line.slice(0, cur.ch);
+
+                // Match Given, When, Then, And, But followed by optional query
+                var match = lineToCursor.match(/^\s*(Given|When|Then|And|But)\s*(.*)$/i);
+                if (!match) return null;
+
+                var kw = match[1];
+                var query = match[2] || "";
+                var queryStart = cur.ch - query.length;
+
+                var steps = (window.studioCodeEditor && window.studioCodeEditor.stepCatalog) ? window.studioCodeEditor.stepCatalog : [];
+                var filtered = steps.filter(function (s) {
+                    var targetType = s.stepType || s.StepType || "";
+                    if (kw.toLowerCase() !== "and" && kw.toLowerCase() !== "but") {
+                        if (targetType.toLowerCase() !== kw.toLowerCase()) {
+                            return false;
+                        }
+                    }
+                    if (!query) return true;
+                    var pattern = s.normalizedPattern || s.NormalizedPattern || "";
+                    return pattern.toLowerCase().includes(query.toLowerCase());
+                });
+
+                if (filtered.length === 0) return null;
+
+                var list = filtered.map(function (s) {
+                    var pattern = s.normalizedPattern || s.NormalizedPattern || "";
+                    var snippet = s.autocompleteSnippet || s.AutocompleteSnippet || pattern;
+                    var type = s.stepType || s.StepType || "Step";
+                    return {
+                        text: snippet,
+                        displayText: "[" + type.toUpperCase() + "] " + pattern,
+                        className: "cm-step-hint cm-step-" + type.toLowerCase()
+                    };
+                });
+
+                return {
+                    list: list,
+                    from: CodeMirror.Pos(cur.line, queryStart),
+                    to: CodeMirror.Pos(cur.line, cur.ch)
+                };
+            });
         }
 
         window.studioUi = {
@@ -46,6 +94,19 @@
             instance: null,
             dotNetHelper: null,
             updating: false,
+            stepCatalog: [],
+
+            setStepCatalog: function (catalog) {
+                this.stepCatalog = catalog || [];
+            },
+
+            insertSnippet: function (snippet) {
+                if (!this.instance) return;
+                var doc = this.instance.getDoc();
+                var cursor = doc.getCursor();
+                doc.replaceRange(snippet, cursor);
+                this.instance.focus();
+            },
 
             init: function (textareaId, dotNetRef, mode, initialContent) {
                 var el = document.getElementById(textareaId);
@@ -62,13 +123,33 @@
                         lineWrapping: false,
                         tabSize: 4,
                         indentUnit: 4,
-                        indentWithTabs: false
+                        indentWithTabs: false,
+                        extraKeys: {
+                            "Ctrl-Space": function (cm) {
+                                if (cm.getOption("mode") === "text/x-gherkin" || cm.getOption("mode") === "gherkin") {
+                                    cm.showHint({ hint: CodeMirror.hint.gherkin, completeSingle: false });
+                                }
+                            }
+                        }
                     });
 
                     this.instance.on('change', function (cm) {
                         if (!self.updating && self.dotNetHelper) {
                             var text = cm.getValue();
                             self.dotNetHelper.invokeMethodAsync('OnEditorContentChanged', text);
+                        }
+                    });
+
+                    this.instance.on('inputRead', function (cm, change) {
+                        var m = cm.getOption("mode");
+                        if (m === "text/x-gherkin" || m === "gherkin") {
+                            var cur = cm.getCursor();
+                            var line = cm.getLine(cur.line);
+                            if (/^\s*(Given|When|Then|And|But)\s+/i.test(line)) {
+                                if (!cm.state.completionActive) {
+                                    cm.showHint({ hint: CodeMirror.hint.gherkin, completeSingle: false });
+                                }
+                            }
                         }
                     });
                 }
