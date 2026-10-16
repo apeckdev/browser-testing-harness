@@ -40,6 +40,7 @@ PlaywrightMcpHarness.Tests/Features/*.feature
 PlaywrightMcpHarness.Tests/Features/*.feature.cs
 PlaywrightMcpHarness.Tests/StepDefinitions/*.cs
 PlaywrightMcpHarness.Tests/Pages/*.cs
+PlaywrightMcpHarness.Tests/VisualBaselines/*.png
 !PlaywrightMcpHarness.Tests/Features/.gitkeep
 !PlaywrightMcpHarness.Tests/StepDefinitions/.gitkeep
 !PlaywrightMcpHarness.Tests/StepDefinitions/VisualSteps.cs
