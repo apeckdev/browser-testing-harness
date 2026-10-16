@@ -21,6 +21,10 @@ TestResults/
 **/.playwright-mcp/
 .playwright/
 playwright-report/
+TestArtifacts/
+**/TestArtifacts/
+traces/
+**/traces/
 
 ## OS generated files
 .DS_Store

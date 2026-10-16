@@ -421,40 +421,79 @@
                             <div class="d-flex flex-column gap-2">
                                 @foreach (var sc in _testScenarios)
                                 {
-                                    <div class="p-2 px-3 rounded-2 border @(sc.Passed ? "border-success border-opacity-25 bg-success bg-opacity-10" : "border-danger border-opacity-50 bg-danger bg-opacity-10") d-flex align-items-center justify-content-between">
-                                        <div class="d-flex align-items-center gap-2">
-                                            @if (sc.Passed)
-                                            {
-                                                <i class="bi bi-check-circle-fill text-success fs-6"></i>
-                                            }
-                                            else
-                                            {
-                                                <i class="bi bi-x-circle-fill text-danger fs-6"></i>
-                                            }
-                                            <span class="fw-semibold text-light small">@sc.Name</span>
-                                            @if (!string.IsNullOrEmpty(sc.ErrorMessage))
-                                            {
-                                                <span class="text-danger small ms-2">(@sc.ErrorMessage)</span>
-                                            }
+                                    <div class="p-2 px-3 rounded-2 border @(sc.Passed ? "border-success border-opacity-25 bg-success bg-opacity-10" : "border-danger border-opacity-50 bg-danger bg-opacity-10") d-flex flex-column gap-2">
+                                        <div class="d-flex align-items-center justify-content-between">
+                                            <div class="d-flex align-items-center gap-2">
+                                                @if (sc.Passed)
+                                                {
+                                                    <i class="bi bi-check-circle-fill text-success fs-6"></i>
+                                                }
+                                                else
+                                                {
+                                                    <i class="bi bi-x-circle-fill text-danger fs-6"></i>
+                                                }
+                                                <span class="fw-semibold text-light small">@sc.Name</span>
+                                                @if (!string.IsNullOrEmpty(sc.ErrorMessage))
+                                                {
+                                                    <span class="text-danger small ms-2">(@sc.ErrorMessage)</span>
+                                                }
+                                            </div>
+                                            <div class="d-flex align-items-center gap-2">
+                                                @if (!string.IsNullOrEmpty(sc.TraceFileName))
+                                                {
+                                                    <button class="btn btn-xs btn-outline-info d-flex align-items-center gap-1 py-0 px-2"
+                                                            title="Launch interactive Playwright Trace Viewer GUI"
+                                                            @onclick="() => OpenTraceForScenario(sc)">
+                                                        <i class="bi bi-play-circle"></i> Trace
+                                                    </button>
+                                                    <a href="/test-artifacts/traces/@sc.TraceFileName" download
+                                                       class="btn btn-xs btn-outline-secondary py-0 px-2 text-decoration-none"
+                                                       title="Download trace .zip file">
+                                                        <i class="bi bi-download"></i>
+                                                    </a>
+                                                }
+                                                @if (!sc.Passed)
+                                                {
+                                                    @if (!string.IsNullOrEmpty(sc.ScreenshotFileName))
+                                                    {
+                                                        <button class="btn btn-xs btn-outline-warning d-flex align-items-center gap-1 py-0 px-2"
+                                                                title="View Failure Screenshot"
+                                                                @onclick="() => PreviewScreenshot(sc)">
+                                                            <i class="bi bi-image"></i> Screenshot
+                                                        </button>
+                                                    }
+                                                    <button class="btn btn-xs btn-outline-danger d-flex align-items-center gap-1 py-0 px-2"
+                                                            title="Send this scenario failure to AI Agent to diagnose and fix"
+                                                            @onclick="() => SendScenarioFailureToAgent(sc)"
+                                                            disabled="@(_isAgentBusy || _isTestRunning)">
+                                                        <i class="bi bi-robot"></i> Fix with Agent
+                                                    </button>
+                                                }
+                                                @if (!string.IsNullOrEmpty(sc.Duration))
+                                                {
+                                                    <span class="badge bg-dark text-secondary border border-secondary border-opacity-25" style="font-size: 0.72rem;">@sc.Duration</span>
+                                                }
+                                                <span class="badge @(sc.Passed ? "bg-success" : "bg-danger") text-light" style="font-size: 0.72rem;">
+                                                    @(sc.Passed ? "Passed" : "Failed")
+                                                </span>
+                                            </div>
                                         </div>
-                                        <div class="d-flex align-items-center gap-2">
-                                            @if (!sc.Passed)
-                                            {
-                                                <button class="btn btn-xs btn-outline-danger d-flex align-items-center gap-1 py-0 px-2"
-                                                        title="Send this scenario failure to AI Agent to diagnose and fix"
-                                                        @onclick="() => SendScenarioFailureToAgent(sc)"
-                                                        disabled="@(_isAgentBusy || _isTestRunning)">
-                                                    <i class="bi bi-robot"></i> Fix with Agent
-                                                </button>
-                                            }
-                                            @if (!string.IsNullOrEmpty(sc.Duration))
-                                            {
-                                                <span class="badge bg-dark text-secondary border border-secondary border-opacity-25" style="font-size: 0.72rem;">@sc.Duration</span>
-                                            }
-                                            <span class="badge @(sc.Passed ? "bg-success" : "bg-danger") text-light" style="font-size: 0.72rem;">
-                                                @(sc.Passed ? "Passed" : "Failed")
-                                            </span>
-                                        </div>
+
+                                        @if (!sc.Passed && !string.IsNullOrEmpty(sc.ScreenshotFileName))
+                                        {
+                                            <div class="d-flex align-items-center gap-3 pt-1 border-top border-danger border-opacity-25">
+                                                <img src="/test-artifacts/screenshots/@sc.ScreenshotFileName"
+                                                     alt="Failure Screenshot Preview"
+                                                     class="rounded border border-danger border-opacity-50 shadow-sm"
+                                                     style="height: 48px; width: 85px; object-fit: cover; cursor: pointer;"
+                                                     title="Click to view full-resolution failure screenshot"
+                                                     @onclick="() => PreviewScreenshot(sc)" />
+                                                <div class="small text-secondary">
+                                                    <span class="text-danger fw-semibold"><i class="bi bi-camera-fill me-1"></i>Failure Snapshot Captured:</span>
+                                                    Click thumbnail to view screenshot or click <strong class="text-info">Trace</strong> for time-travel debugging.
+                                                </div>
+                                            </div>
+                                        }
                                     </div>
                                 }
                             </div>
@@ -570,6 +609,49 @@
     </div>
 }
 
+<!-- Modal: Failure Screenshot Preview -->
+@if (_previewScenarioScreenshot != null)
+{
+    <div class="modal fade show d-block" tabindex="-1" style="background-color: rgba(0,0,0,0.85); z-index: 1060;" @onclick="CloseScreenshotModal">
+        <div class="modal-dialog modal-xl modal-dialog-centered" @onclick:stopPropagation>
+            <div class="modal-content bg-dark text-light border border-secondary shadow-lg">
+                <div class="modal-header border-secondary border-opacity-50 py-2">
+                    <h6 class="modal-title d-flex align-items-center gap-2 mb-0">
+                        <i class="bi bi-camera-fill text-danger"></i>
+                        Failure Snapshot: <span class="text-info">@_previewScenarioScreenshot.Name</span>
+                    </h6>
+                    <button type="button" class="btn-close btn-close-white" @onclick="CloseScreenshotModal"></button>
+                </div>
+                <div class="modal-body p-2 text-center bg-black d-flex justify-content-center align-items-center" style="min-height: 350px;">
+                    <img src="/test-artifacts/screenshots/@_previewScenarioScreenshot.ScreenshotFileName"
+                         alt="Failure Screenshot"
+                         class="img-fluid rounded border border-secondary shadow"
+                         style="max-height: 75vh; width: auto; object-fit: contain;" />
+                </div>
+                <div class="modal-footer border-secondary border-opacity-50 py-2 d-flex justify-content-between align-items-center">
+                    <div class="small text-secondary">
+                        Artifact: <code>@_previewScenarioScreenshot.ScreenshotFileName</code>
+                    </div>
+                    <div class="d-flex align-items-center gap-2">
+                        @if (!string.IsNullOrEmpty(_previewScenarioScreenshot.TraceFileName))
+                        {
+                            <button class="btn btn-sm btn-outline-info d-flex align-items-center gap-1"
+                                    @onclick="() => OpenTraceForScenario(_previewScenarioScreenshot)">
+                                <i class="bi bi-play-circle"></i> Open in Trace Viewer
+                            </button>
+                        }
+                        <button class="btn btn-sm btn-danger d-flex align-items-center gap-1"
+                                @onclick="async () => { var sc = _previewScenarioScreenshot; CloseScreenshotModal(); await SendScenarioFailureToAgent(sc); }">
+                            <i class="bi bi-robot"></i> Fix with Agent
+                        </button>
+                        <button type="button" class="btn btn-sm btn-secondary" @onclick="CloseScreenshotModal">Close</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+}
+
 <style>
     .cursor-blink {
         display: inline-block;
@@ -628,12 +710,16 @@
                                     l.Contains("Error Message:", StringComparison.OrdinalIgnoreCase) ||
                                     l.Contains("Test Run Failed", StringComparison.OrdinalIgnoreCase));
 
+    private ScenarioResult? _previewScenarioScreenshot;
+
     public class ScenarioResult
     {
         public string Name { get; set; } = "";
         public bool Passed { get; set; }
         public string Duration { get; set; } = "";
         public string ErrorMessage { get; set; } = "";
+        public string? ScreenshotFileName { get; set; }
+        public string? TraceFileName { get; set; }
     }
 
     private string StatusBadgeClass => _statusText.Contains("failed", StringComparison.OrdinalIgnoreCase) || _statusText.Contains("error", StringComparison.OrdinalIgnoreCase)
@@ -1107,8 +1193,60 @@
             _isTestRunning = false;
             _testCts?.Dispose();
             _testCts = null;
+            ValidateScenarioArtifacts();
             await InvokeAsync(StateHasChanged);
             _ = ScrollConsoleToBottomAsync();
+        }
+    }
+
+    private void ValidateScenarioArtifacts()
+    {
+        try
+        {
+            var artifactsDir = TestRunner.GetTestArtifactsPath();
+            var tracesDir = Path.Combine(artifactsDir, "traces");
+            var screenshotsDir = Path.Combine(artifactsDir, "screenshots");
+
+            foreach (var sc in _testScenarios)
+            {
+                var sanitized = System.Text.RegularExpressions.Regex.Replace(sc.Name, @"[^a-zA-Z0-9_\-]", "_");
+                if (Directory.Exists(tracesDir) && File.Exists(Path.Combine(tracesDir, $"{sanitized}.zip")))
+                {
+                    sc.TraceFileName = $"{sanitized}.zip";
+                }
+                else
+                {
+                    sc.TraceFileName = null;
+                }
+
+                if (Directory.Exists(screenshotsDir) && File.Exists(Path.Combine(screenshotsDir, $"{sanitized}.png")))
+                {
+                    sc.ScreenshotFileName = $"{sanitized}.png";
+                }
+                else
+                {
+                    sc.ScreenshotFileName = null;
+                }
+            }
+        }
+        catch { }
+    }
+
+    private void PreviewScreenshot(ScenarioResult sc)
+    {
+        _previewScenarioScreenshot = sc;
+    }
+
+    private void CloseScreenshotModal()
+    {
+        _previewScenarioScreenshot = null;
+    }
+
+    private void OpenTraceForScenario(ScenarioResult sc)
+    {
+        if (!string.IsNullOrEmpty(sc.TraceFileName))
+        {
+            TestRunner.OpenTraceViewer(sc.TraceFileName);
         }
     }
 
@@ -1130,6 +1268,8 @@
             sb.AppendLine($"### Failed Scenario: {targetScenario.Name}");
             if (!string.IsNullOrEmpty(targetScenario.Duration)) sb.AppendLine($"Duration: {targetScenario.Duration}");
             if (!string.IsNullOrEmpty(targetScenario.ErrorMessage)) sb.AppendLine($"Error: {targetScenario.ErrorMessage}");
+            if (!string.IsNullOrEmpty(targetScenario.ScreenshotFileName)) sb.AppendLine($"Failure Screenshot: TestArtifacts/screenshots/{targetScenario.ScreenshotFileName}");
+            if (!string.IsNullOrEmpty(targetScenario.TraceFileName)) sb.AppendLine($"Playwright Trace: TestArtifacts/traces/{targetScenario.TraceFileName}");
             sb.AppendLine();
         }
         else
@@ -1198,9 +1338,26 @@
             var durationMatch = System.Text.RegularExpressions.Regex.Match(rest, @"\[(.*?)\]$");
             var duration = durationMatch.Success ? durationMatch.Groups[1].Value : "";
             var name = durationMatch.Success ? rest.Substring(0, durationMatch.Index).Trim() : rest;
-            if (!string.IsNullOrWhiteSpace(name) && !_testScenarios.Any(s => s.Name == name))
+            if (!string.IsNullOrWhiteSpace(name))
             {
-                _testScenarios.Add(new ScenarioResult { Name = name, Passed = true, Duration = duration });
+                var sanitized = System.Text.RegularExpressions.Regex.Replace(name, @"[^a-zA-Z0-9_\-]", "_");
+                var existing = _testScenarios.FirstOrDefault(s => s.Name == name);
+                if (existing != null)
+                {
+                    existing.Passed = true;
+                    existing.Duration = duration;
+                    existing.TraceFileName = $"{sanitized}.zip";
+                }
+                else
+                {
+                    _testScenarios.Add(new ScenarioResult
+                    {
+                        Name = name,
+                        Passed = true,
+                        Duration = duration,
+                        TraceFileName = $"{sanitized}.zip"
+                    });
+                }
             }
         }
         else if (trimmed.StartsWith("Failed ", StringComparison.OrdinalIgnoreCase) && !trimmed.StartsWith("Failed!", StringComparison.OrdinalIgnoreCase))
@@ -1209,9 +1366,44 @@
             var durationMatch = System.Text.RegularExpressions.Regex.Match(rest, @"\[(.*?)\]$");
             var duration = durationMatch.Success ? durationMatch.Groups[1].Value : "";
             var name = durationMatch.Success ? rest.Substring(0, durationMatch.Index).Trim() : rest;
-            if (!string.IsNullOrWhiteSpace(name) && !_testScenarios.Any(s => s.Name == name))
+            if (!string.IsNullOrWhiteSpace(name))
             {
-                _testScenarios.Add(new ScenarioResult { Name = name, Passed = false, Duration = duration });
+                var sanitized = System.Text.RegularExpressions.Regex.Replace(name, @"[^a-zA-Z0-9_\-]", "_");
+                var existing = _testScenarios.FirstOrDefault(s => s.Name == name);
+                if (existing != null)
+                {
+                    existing.Passed = false;
+                    existing.Duration = duration;
+                    existing.TraceFileName = $"{sanitized}.zip";
+                }
+                else
+                {
+                    _testScenarios.Add(new ScenarioResult
+                    {
+                        Name = name,
+                        Passed = false,
+                        Duration = duration,
+                        TraceFileName = $"{sanitized}.zip"
+                    });
+                }
+            }
+        }
+        else if (trimmed.StartsWith("[ARTIFACT_SCREENSHOT] ", StringComparison.OrdinalIgnoreCase))
+        {
+            var fileName = trimmed.Substring(22).Trim();
+            var lastFailed = _testScenarios.LastOrDefault(s => !s.Passed);
+            if (lastFailed != null)
+            {
+                lastFailed.ScreenshotFileName = fileName;
+            }
+        }
+        else if (trimmed.StartsWith("[ARTIFACT_TRACE] ", StringComparison.OrdinalIgnoreCase))
+        {
+            var fileName = trimmed.Substring(17).Trim();
+            var lastSc = _testScenarios.LastOrDefault();
+            if (lastSc != null)
+            {
+                lastSc.TraceFileName = fileName;
             }
         }
     }

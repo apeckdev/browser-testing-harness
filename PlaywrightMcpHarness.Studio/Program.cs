@@ -30,6 +30,25 @@ if (!app.Environment.IsDevelopment())
     app.UseHttpsRedirection();
 }
 app.UseStaticFiles();
+
+// Serve test execution artifacts (screenshots, traces) from TestArtifacts directory
+var testRunner = app.Services.GetRequiredService<ITestRunnerService>();
+var artifactsPath = testRunner.GetTestArtifactsPath();
+if (!Directory.Exists(artifactsPath))
+{
+    Directory.CreateDirectory(artifactsPath);
+}
+var tracesDir = Path.Combine(artifactsPath, "traces");
+if (!Directory.Exists(tracesDir)) Directory.CreateDirectory(tracesDir);
+var screenshotsDir = Path.Combine(artifactsPath, "screenshots");
+if (!Directory.Exists(screenshotsDir)) Directory.CreateDirectory(screenshotsDir);
+
+app.UseStaticFiles(new StaticFileOptions
+{
+    FileProvider = new Microsoft.Extensions.FileProviders.PhysicalFileProvider(artifactsPath),
+    RequestPath = "/test-artifacts"
+});
+
 app.UseAntiforgery();
 
 app.MapRazorComponents<App>()

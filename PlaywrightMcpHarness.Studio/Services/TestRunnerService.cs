@@ -14,6 +14,8 @@ public interface ITestRunnerService
     bool IsRunning { get; }
     Task<int> RunTestsAsync(TestRunOptions options, Action<string> onOutputLine, CancellationToken cancellationToken = default);
     Task<int> RunTestsAsync(VisualExecutionMode mode, Action<string> onOutputLine, CancellationToken cancellationToken = default);
+    void OpenTraceViewer(string traceFileName);
+    string GetTestArtifactsPath();
 }
 
 public class TestRunnerService : ITestRunnerService
@@ -74,6 +76,13 @@ public class TestRunnerService : ITestRunnerService
             var userDotnetDir = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".dotnet");
             var currentPath = Environment.GetEnvironmentVariable("PATH") ?? "";
             startInfo.EnvironmentVariables["PATH"] = $"{userDotnetDir};{currentPath}";
+
+            var artifactsDir = Path.Combine(testsProjectDir, "TestArtifacts");
+            if (!Directory.Exists(artifactsDir))
+            {
+                Directory.CreateDirectory(artifactsDir);
+            }
+            startInfo.EnvironmentVariables["TEST_ARTIFACTS_DIR"] = artifactsDir;
 
             string envArgs;
             switch (options.Mode)
@@ -282,4 +291,53 @@ public class TestRunnerService : ITestRunnerService
             return null;
         }
     }
+
+    public string GetTestArtifactsPath()
+    {
+        var testsProjectDir = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, _config.TestsProjectPath));
+        if (!Directory.Exists(testsProjectDir) && Directory.Exists(Path.GetFullPath(_config.TestsProjectPath)))
+        {
+            testsProjectDir = Path.GetFullPath(_config.TestsProjectPath);
+        }
+        return Path.Combine(testsProjectDir, "TestArtifacts");
+    }
+
+    public void OpenTraceViewer(string traceFileName)
+    {
+        try
+        {
+            var artifactsDir = GetTestArtifactsPath();
+            var tracePath = Path.Combine(artifactsDir, "traces", traceFileName);
+            if (!File.Exists(tracePath))
+            {
+                var binTrace = Path.Combine(Path.GetDirectoryName(artifactsDir)!, "bin", "Debug", "net8.0", "traces", traceFileName);
+                if (File.Exists(binTrace))
+                {
+                    tracePath = binTrace;
+                }
+            }
+
+            if (File.Exists(tracePath))
+            {
+                _logger.LogInformation("Spawning Playwright show-trace for {TracePath}", tracePath);
+                var psi = new ProcessStartInfo
+                {
+                    FileName = "cmd.exe",
+                    Arguments = $"/c npx playwright show-trace \"{tracePath}\"",
+                    UseShellExecute = true,
+                    CreateNoWindow = true
+                };
+                Process.Start(psi);
+            }
+            else
+            {
+                _logger.LogWarning("Trace file not found: {TracePath}", tracePath);
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Failed to launch Playwright Trace Viewer for {TraceFile}", traceFileName);
+        }
+    }
 }
+

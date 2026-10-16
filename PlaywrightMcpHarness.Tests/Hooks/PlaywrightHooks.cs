@@ -72,13 +72,47 @@ public class PlaywrightHooks
     [AfterScenario]
     public async Task AfterScenarioAsync()
     {
+        var scenarioTitle = _scenarioContext.ScenarioInfo.Title ?? "scenario";
+        var sanitizedTitle = Regex.Replace(scenarioTitle, @"[^a-zA-Z0-9_\-]", "_");
+        
+        var artifactsDir = Environment.GetEnvironmentVariable("TEST_ARTIFACTS_DIR");
+        if (string.IsNullOrWhiteSpace(artifactsDir))
+        {
+            artifactsDir = Path.Combine(Directory.GetCurrentDirectory(), "TestArtifacts");
+        }
+
+        // 1. Capture Failure Screenshot if test encountered an error
+        bool isFailed = _scenarioContext.TestError != null || _scenarioContext.ScenarioExecutionStatus != ScenarioExecutionStatus.OK;
+        if (isFailed && _page != null)
+        {
+            try
+            {
+                var screenshotsDir = Path.Combine(artifactsDir, "screenshots");
+                if (!Directory.Exists(screenshotsDir))
+                {
+                    Directory.CreateDirectory(screenshotsDir);
+                }
+
+                var screenshotPath = Path.Combine(screenshotsDir, $"{sanitizedTitle}.png");
+                await _page.ScreenshotAsync(new PageScreenshotOptions
+                {
+                    Path = screenshotPath,
+                    FullPage = true
+                });
+                Console.WriteLine($"[ARTIFACT_SCREENSHOT] {sanitizedTitle}.png");
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"[PlaywrightHooks] Error capturing failure screenshot: {ex.Message}");
+            }
+        }
+
+        // 2. Stop Tracing and save trace .zip
         try
         {
             if (_context != null)
             {
-                var scenarioTitle = _scenarioContext.ScenarioInfo.Title ?? "scenario";
-                var sanitizedTitle = Regex.Replace(scenarioTitle, @"[^a-zA-Z0-9_\-]", "_");
-                var tracesDir = Path.Combine(Directory.GetCurrentDirectory(), "traces");
+                var tracesDir = Path.Combine(artifactsDir, "traces");
                 if (!Directory.Exists(tracesDir))
                 {
                     Directory.CreateDirectory(tracesDir);
@@ -89,6 +123,7 @@ public class PlaywrightHooks
                 {
                     Path = tracePath
                 });
+                Console.WriteLine($"[ARTIFACT_TRACE] {sanitizedTitle}.zip");
             }
         }
         catch (Exception ex)

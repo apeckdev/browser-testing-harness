@@ -61,6 +61,10 @@ The harness decouples **AI Agent Exploration & Authoring** from **Automated Test
 - **Targeted & Parallel Execution**:
   - Filter and run individual features or execute the entire test suite.
   - Toggle between parallel execution and sequential mode.
+- **Visual Debugging & Playwright Trace Viewer**:
+  - Automatic full-page failure screenshots (`.png`) and Playwright execution traces (`.zip`) captured into `TestArtifacts` on scenario failure.
+  - Interactive scenario cards with failure thumbnails and full-screen lightbox preview modals.
+  - One-click launch of the native Playwright Trace Viewer (`playwright show-trace`) and direct trace archive downloads.
 - **AI Diagnostics & Self-Healing ("Fix with Agent")**:
   - When tests fail, a **Fix with Agent** button appears in both the Test Runner header and per-scenario cards.
   - Automatically captures the failure message, Playwright stack traces, and relevant file contents into an actionable diagnostic prompt for the AI to fix immediately.
