@@ -5,6 +5,7 @@
 @inject IMcpAgentService AgentService
 @inject ITestRunnerService TestRunner
 @inject IStepCatalogService StepCatalog
+@inject IScenarioOutlineService ScenarioOutlineService
 @inject IOptions<HarnessConfig> ConfigOptions
 @inject IJSRuntime JS
 
@@ -317,6 +318,17 @@
                                 <span class="d-none d-sm-inline" style="font-size: 0.75rem;">Step Catalog</span>
                                 <span class="badge bg-info bg-opacity-25 text-info rounded-pill px-1" style="font-size: 0.7rem;">@StepCatalog.Steps.Count</span>
                             </button>
+
+                            @if (_selectedFilePath.EndsWith(".feature", StringComparison.OrdinalIgnoreCase))
+                            {
+                                <!-- AI Edge-Case & Outline Generator Button -->
+                                <button class="btn btn-sm btn-outline-warning d-flex align-items-center gap-1 py-0 px-2 text-nowrap"
+                                        title="Convert scenario to Scenario Outline with AI-generated boundary cases & test data matrix"
+                                        @onclick="OpenScenarioOutlineModal">
+                                    <i class="bi bi-grid-3x3-gap-fill"></i>
+                                    <span class="d-none d-sm-inline" style="font-size: 0.75rem;">Generate Edge Cases</span>
+                                </button>
+                            }
 
                             <!-- Full Screen Toggle Button -->
                             <button class="btn btn-sm btn-outline-secondary d-flex align-items-center gap-1 py-0 px-2"
@@ -803,6 +815,204 @@
     </div>
 }
 
+<!-- Modal: AI Edge-Case & Scenario Outline Generator -->
+@if (_showOutlineModal)
+{
+    <div class="modal fade show d-block" tabindex="-1" style="background-color: rgba(0,0,0,0.8); z-index: 1056;" @onclick="CloseScenarioOutlineModal">
+        <div class="modal-dialog modal-xl modal-dialog-centered modal-dialog-scrollable" @onclick:stopPropagation>
+            <div class="modal-content bg-dark text-light border border-secondary shadow-lg">
+                <!-- Header -->
+                <div class="modal-header border-secondary border-opacity-50 py-2 d-flex justify-content-between align-items-center">
+                    <div class="d-flex align-items-center gap-2">
+                        <i class="bi bi-grid-3x3-gap-fill text-warning fs-5"></i>
+                        <div>
+                            <h6 class="modal-title mb-0 fw-semibold">AI Edge-Case & Scenario Outline Generator</h6>
+                            <div class="text-secondary" style="font-size: 0.75rem;">
+                                Automatically parameterize scenarios and build a comprehensive test data matrix
+                            </div>
+                        </div>
+                    </div>
+                    <button type="button" class="btn-close btn-close-white" @onclick="CloseScenarioOutlineModal"></button>
+                </div>
+
+                <!-- Modal Body -->
+                <div class="modal-body p-3">
+                    <div class="row g-3">
+                        <!-- Left Panel: Scenario Selection & Category Toggles -->
+                        <div class="col-lg-5 d-flex flex-column gap-3 border-end border-secondary border-opacity-25 pe-3">
+                            <div>
+                                <label class="form-label small fw-semibold text-secondary mb-1">
+                                    <i class="bi bi-file-earmark-text me-1 text-info"></i>Select Scenario to Parameterize:
+                                </label>
+                                @if (_detectedScenarios.Count == 0)
+                                {
+                                    <div class="alert alert-secondary py-1 px-2 small mb-0">No scenarios detected in open file.</div>
+                                }
+                                else
+                                {
+                                    <select class="form-select form-select-sm bg-dark text-light border-secondary border-opacity-50"
+                                            @bind="_selectedScenarioIndex">
+                                        @for (int i = 0; i < _detectedScenarios.Count; i++)
+                                        {
+                                            var sc = _detectedScenarios[i];
+                                            <option value="@i">
+                                                @(sc.IsOutline ? "[Outline]" : "[Scenario]") @sc.Title (Lines @sc.StartLine-@sc.EndLine)
+                                            </option>
+                                        }
+                                    </select>
+                                }
+                            </div>
+
+                            @if (CurrentSelectedScenario != null)
+                            {
+                                <div>
+                                    <label class="form-label small fw-semibold text-secondary mb-1">Original Scenario Preview:</label>
+                                    <pre class="bg-black bg-opacity-50 p-2 rounded text-light font-monospace small mb-0 border border-secondary border-opacity-25"
+                                         style="max-height: 120px; overflow-y: auto; font-size: 0.78rem;">@CurrentSelectedScenario.RawText</pre>
+                                </div>
+                            }
+
+                            <div>
+                                <label class="form-label small fw-semibold text-secondary mb-1">
+                                    <i class="bi bi-sliders me-1 text-warning"></i>Edge-Case Categories to Include:
+                                </label>
+                                <div class="d-flex flex-column gap-1 bg-black bg-opacity-30 p-2 rounded border border-secondary border-opacity-25">
+                                    <div class="form-check form-switch small">
+                                        <input class="form-check-input" type="checkbox" id="catHappy" @bind="_edgeCaseOptions.IncludeHappyPath" />
+                                        <label class="form-check-label text-light" for="catHappy">
+                                            <strong>Happy Path</strong> <span class="text-secondary">(Valid equivalence classes)</span>
+                                        </label>
+                                    </div>
+                                    <div class="form-check form-switch small">
+                                        <input class="form-check-input" type="checkbox" id="catBoundaries" @bind="_edgeCaseOptions.IncludeBoundaryLimits" />
+                                        <label class="form-check-label text-light" for="catBoundaries">
+                                            <strong>Boundary Limits</strong> <span class="text-secondary">(1-char min, max field lengths)</span>
+                                        </label>
+                                    </div>
+                                    <div class="form-check form-switch small">
+                                        <input class="form-check-input" type="checkbox" id="catEmpty" @bind="_edgeCaseOptions.IncludeEmptyAndWhitespace" />
+                                        <label class="form-check-label text-light" for="catEmpty">
+                                            <strong>Empty & Whitespace</strong> <span class="text-secondary">(Blank, spaces only, missing)</span>
+                                        </label>
+                                    </div>
+                                    <div class="form-check form-switch small">
+                                        <input class="form-check-input" type="checkbox" id="catSpecial" @bind="_edgeCaseOptions.IncludeSpecialCharsAndUnicode" />
+                                        <label class="form-check-label text-light" for="catSpecial">
+                                            <strong>Unicode & Special Chars</strong> <span class="text-secondary">(Accents René, O'Connor, symbols)</span>
+                                        </label>
+                                    </div>
+                                    <div class="form-check form-switch small">
+                                        <input class="form-check-input" type="checkbox" id="catSecurity" @bind="_edgeCaseOptions.IncludeSecuritySanity" />
+                                        <label class="form-check-label text-light" for="catSecurity">
+                                            <strong>Security Sanity</strong> <span class="text-secondary">(HTML/XSS &lt;script&gt;, SQL quotes)</span>
+                                        </label>
+                                    </div>
+                                    <div class="form-check form-switch small">
+                                        <input class="form-check-input" type="checkbox" id="catMalformed" @bind="_edgeCaseOptions.IncludeMalformedFormats" />
+                                        <label class="form-check-label text-light" for="catMalformed">
+                                            <strong>Malformed Formats</strong> <span class="text-secondary">(Invalid email/URL structure)</span>
+                                        </label>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <div class="d-flex align-items-center justify-content-between">
+                                <label class="form-label small fw-semibold text-secondary mb-0">Max Example Rows:</label>
+                                <select class="form-select form-select-sm bg-dark text-light border-secondary border-opacity-50" style="width: 100px;" @bind="_maxExamples">
+                                    <option value="4">4 rows</option>
+                                    <option value="6">6 rows</option>
+                                    <option value="8">8 rows</option>
+                                    <option value="12">12 rows</option>
+                                </select>
+                            </div>
+
+                            <button class="btn btn-warning w-100 d-flex align-items-center justify-content-center gap-2 fw-semibold shadow-sm"
+                                    @onclick="TriggerGenerateOutline"
+                                    disabled="@(_isGeneratingOutline || CurrentSelectedScenario == null)">
+                                @if (_isGeneratingOutline)
+                                {
+                                    <span class="spinner-border spinner-border-sm" role="status"></span>
+                                    <span>Generating Boundary Matrix...</span>
+                                }
+                                else
+                                {
+                                    <i class="bi bi-magic"></i>
+                                    <span>Generate Scenario Outline</span>
+                                }
+                            </button>
+
+                            @if (!string.IsNullOrEmpty(_outlineErrorMessage))
+                            {
+                                <div class="alert alert-danger py-1 px-2 small mb-0">
+                                    <i class="bi bi-exclamation-triangle me-1"></i>@_outlineErrorMessage
+                                </div>
+                            }
+                        </div>
+
+                        <!-- Right Panel: Generated Gherkin Preview -->
+                        <div class="col-lg-7 d-flex flex-column gap-2">
+                            <div class="d-flex align-items-center justify-content-between">
+                                <label class="form-label small fw-semibold text-secondary mb-0">
+                                    <i class="bi bi-code-square me-1 text-info"></i>Generated Scenario Outline:
+                                </label>
+                                @if (!string.IsNullOrWhiteSpace(_generatedOutlineResult))
+                                {
+                                    <span class="badge bg-success bg-opacity-25 text-success border border-success border-opacity-50" style="font-size: 0.72rem;">
+                                        <i class="bi bi-check-circle me-1"></i>Ready to Apply
+                                    </span>
+                                }
+                            </div>
+
+                            @if (string.IsNullOrWhiteSpace(_generatedOutlineResult))
+                            {
+                                <div class="d-flex flex-column align-items-center justify-content-center flex-grow-1 bg-black bg-opacity-30 rounded border border-secondary border-opacity-25 p-4 text-center text-secondary" style="min-height: 320px;">
+                                    <i class="bi bi-grid-3x3-gap display-4 mb-2 opacity-50"></i>
+                                    <div class="fw-semibold">No outline generated yet</div>
+                                    <div class="small text-secondary">
+                                        Select a scenario on the left, check desired edge-case categories, and click <strong>Generate Scenario Outline</strong>.
+                                    </div>
+                                </div>
+                            }
+                            else
+                            {
+                                <pre class="bg-black p-3 rounded text-info font-monospace small mb-0 border border-info border-opacity-25 flex-grow-1"
+                                     style="min-height: 320px; max-height: 480px; overflow-y: auto; white-space: pre; line-height: 1.5; font-size: 0.82rem;">@_generatedOutlineResult</pre>
+                            }
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Footer Actions -->
+                <div class="modal-footer border-secondary border-opacity-50 py-2 d-flex justify-content-between align-items-center">
+                    <div class="small text-secondary">
+                        Using active AI model: <strong class="text-light">@_currentProviderOverride.ModelId</strong> (@_selectedProviderKey)
+                    </div>
+                    <div class="d-flex align-items-center gap-2">
+                        @if (!string.IsNullOrWhiteSpace(_generatedOutlineResult))
+                        {
+                            <button type="button" class="btn btn-sm btn-success d-flex align-items-center gap-1"
+                                    @onclick="ApplyGeneratedOutlineReplace"
+                                    title="Replace the original scenario in the open file with this outline">
+                                <i class="bi bi-arrow-repeat"></i> Replace Original Scenario
+                            </button>
+                            <button type="button" class="btn btn-sm btn-outline-info d-flex align-items-center gap-1"
+                                    @onclick="ApplyGeneratedOutlineAppend"
+                                    title="Append this outline to the bottom of the open file">
+                                <i class="bi bi-plus-circle"></i> Append as New Outline
+                            </button>
+                            <button type="button" class="btn btn-sm btn-outline-secondary d-flex align-items-center gap-1"
+                                    @onclick="CopyGeneratedOutline">
+                                <i class="bi bi-clipboard"></i> Copy
+                            </button>
+                        }
+                        <button type="button" class="btn btn-sm btn-secondary" @onclick="CloseScenarioOutlineModal">Close</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+}
+
 <style>
     .cursor-blink {
         display: inline-block;
@@ -930,6 +1140,117 @@
             var snippet = $"{step.StepType} {step.AutocompleteSnippet}";
             await JS.InvokeVoidAsync("navigator.clipboard.writeText", snippet);
             _statusText = $"Copied to clipboard: {snippet}";
+        }
+        catch { }
+    }
+
+    private bool _showOutlineModal;
+    private List<DetectedScenario> _detectedScenarios = new();
+    private int _selectedScenarioIndex;
+    private EdgeCaseCategoryOptions _edgeCaseOptions = new();
+    private int _maxExamples = 8;
+    private bool _isGeneratingOutline;
+    private string _generatedOutlineResult = "";
+    private string? _outlineErrorMessage;
+    private CancellationTokenSource? _outlineCts;
+
+    private DetectedScenario? CurrentSelectedScenario =>
+        _detectedScenarios.Count > 0 && _selectedScenarioIndex >= 0 && _selectedScenarioIndex < _detectedScenarios.Count
+            ? _detectedScenarios[_selectedScenarioIndex]
+            : null;
+
+    private void OpenScenarioOutlineModal()
+    {
+        _outlineErrorMessage = null;
+        _generatedOutlineResult = "";
+        _detectedScenarios = ScenarioOutlineService.ExtractScenariosFromGherkin(_currentFileContent);
+        _selectedScenarioIndex = 0;
+        _showOutlineModal = true;
+    }
+
+    private void CloseScenarioOutlineModal()
+    {
+        _outlineCts?.Cancel();
+        _isGeneratingOutline = false;
+        _showOutlineModal = false;
+    }
+
+    private async Task TriggerGenerateOutline()
+    {
+        if (CurrentSelectedScenario == null) return;
+
+        _isGeneratingOutline = true;
+        _outlineErrorMessage = null;
+        _generatedOutlineResult = "";
+        _outlineCts = new CancellationTokenSource();
+
+        try
+        {
+            var req = new GenerateOutlineRequest
+            {
+                ScenarioText = CurrentSelectedScenario.RawText,
+                FeatureName = Path.GetFileName(_selectedFilePath),
+                Categories = _edgeCaseOptions,
+                MaxExamples = _maxExamples
+            };
+
+            var res = await ScenarioOutlineService.GenerateOutlineAsync(
+                req,
+                _selectedProviderKey,
+                _currentProviderOverride,
+                _outlineCts.Token);
+
+            if (res.Success)
+            {
+                _generatedOutlineResult = res.GeneratedOutline;
+            }
+            else
+            {
+                _outlineErrorMessage = res.ErrorMessage;
+            }
+        }
+        catch (Exception ex)
+        {
+            _outlineErrorMessage = ex.Message;
+        }
+        finally
+        {
+            _isGeneratingOutline = false;
+            _outlineCts?.Dispose();
+            _outlineCts = null;
+            await InvokeAsync(StateHasChanged);
+        }
+    }
+
+    private async Task ApplyGeneratedOutlineReplace()
+    {
+        if (CurrentSelectedScenario == null || string.IsNullOrWhiteSpace(_generatedOutlineResult)) return;
+
+        var updated = ScenarioOutlineService.ReplaceScenarioInGherkin(_currentFileContent, CurrentSelectedScenario, _generatedOutlineResult);
+        _currentFileContent = updated;
+        await SaveCurrentFileEdits();
+        _showOutlineModal = false;
+        _statusText = $"Replaced scenario '{CurrentSelectedScenario.Title}' with parameterized Scenario Outline.";
+    }
+
+    private async Task ApplyGeneratedOutlineAppend()
+    {
+        if (string.IsNullOrWhiteSpace(_generatedOutlineResult)) return;
+
+        _currentFileContent = _currentFileContent.TrimEnd() + "\n\n" + _generatedOutlineResult.Trim() + "\n";
+        await SaveCurrentFileEdits();
+        _showOutlineModal = false;
+        _statusText = $"Appended new Scenario Outline to {Path.GetFileName(_selectedFilePath)}.";
+    }
+
+    private async Task CopyGeneratedOutline()
+    {
+        if (string.IsNullOrWhiteSpace(_generatedOutlineResult)) return;
+
+        try
+        {
+            await JS.InvokeVoidAsync("navigator.clipboard.writeText", _generatedOutlineResult);
+            _statusText = "Copied Scenario Outline to clipboard!";
         }
         catch { }
     }

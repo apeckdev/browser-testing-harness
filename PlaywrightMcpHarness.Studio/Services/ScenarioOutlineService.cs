@@ -1,0 +1,234 @@
+using System;
+using System.Collections.Generic;
+using System.Linq;
+using System.Text;
+using System.Text.RegularExpressions;
+using System.Threading;
+using System.Threading.Tasks;
+using Microsoft.Extensions.AI;
+using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Options;
+using PlaywrightMcpHarness.Studio.Models;
+
+namespace PlaywrightMcpHarness.Studio.Services;
+
+public interface IScenarioOutlineService
+{
+    List<DetectedScenario> ExtractScenariosFromGherkin(string gherkinContent);
+    Task<GenerateOutlineResponse> GenerateOutlineAsync(
+        GenerateOutlineRequest request,
+        string? providerKey = null,
+        LlmProviderConfig? customOverride = null,
+        CancellationToken cancellationToken = default);
+    string ReplaceScenarioInGherkin(string fullContent, DetectedScenario targetScenario, string replacementOutline);
+}
+
+public class ScenarioOutlineService : IScenarioOutlineService
+{
+    private readonly HarnessConfig _config;
+    private readonly IChatClientFactory _chatClientFactory;
+    private readonly IStepCatalogService _stepCatalog;
+    private readonly ILogger<ScenarioOutlineService> _logger;
+
+    public ScenarioOutlineService(
+        IOptions<HarnessConfig> configOptions,
+        IChatClientFactory chatClientFactory,
+        IStepCatalogService stepCatalog,
+        ILogger<ScenarioOutlineService> logger)
+    {
+        _config = configOptions.Value;
+        _chatClientFactory = chatClientFactory;
+        _stepCatalog = stepCatalog;
+        _logger = logger;
+    }
+
+    public List<DetectedScenario> ExtractScenariosFromGherkin(string gherkinContent)
+    {
+        var results = new List<DetectedScenario>();
+        if (string.IsNullOrWhiteSpace(gherkinContent)) return results;
+
+        var lines = gherkinContent.Split(new[] { "\r\n", "\r", "\n" }, StringSplitOptions.None);
+        DetectedScenario? current = null;
+        var currentText = new StringBuilder();
+
+        for (int i = 0; i < lines.Length; i++)
+        {
+            var line = lines[i];
+            var trimmed = line.Trim();
+
+            var isScenarioOutline = trimmed.StartsWith("Scenario Outline:", StringComparison.OrdinalIgnoreCase);
+            var isScenario = !isScenarioOutline && trimmed.StartsWith("Scenario:", StringComparison.OrdinalIgnoreCase);
+
+            if (isScenario || isScenarioOutline)
+            {
+                if (current != null)
+                {
+                    current.EndLine = i;
+                    current.RawText = currentText.ToString().TrimEnd();
+                    results.Add(current);
+                    currentText.Clear();
+                }
+
+                var title = isScenarioOutline
+                    ? trimmed.Substring("Scenario Outline:".Length).Trim()
+                    : trimmed.Substring("Scenario:".Length).Trim();
+
+                current = new DetectedScenario
+                {
+                    Title = string.IsNullOrWhiteSpace(title) ? $"Scenario #{results.Count + 1}" : title,
+                    StartLine = i + 1,
+                    IsOutline = isScenarioOutline
+                };
+
+                currentText.AppendLine(line);
+            }
+            else if (current != null)
+            {
+                currentText.AppendLine(line);
+            }
+        }
+
+        if (current != null)
+        {
+            current.EndLine = lines.Length;
+            current.RawText = currentText.ToString().TrimEnd();
+            results.Add(current);
+        }
+
+        return results;
+    }
+
+    public async Task<GenerateOutlineResponse> GenerateOutlineAsync(
+        GenerateOutlineRequest request,
+        string? providerKey = null,
+        LlmProviderConfig? customOverride = null,
+        CancellationToken cancellationToken = default)
+    {
+        try
+        {
+            var chatClient = _chatClientFactory.CreateClient(providerKey, customOverride);
+            var categoriesPrompt = BuildCategoriesPrompt(request.Categories);
+            var stepCatalogSummary = _stepCatalog.GetCatalogSummaryForPrompt();
+
+            var prompt = $@"You are a Principal QA Automation Architect specializing in SpecFlow and Playwright.
+Convert the following single Gherkin scenario into a comprehensive parameterized 'Scenario Outline:' with an 'Examples:' table covering critical edge cases, boundary conditions, and real-world inputs.
+
+=== TARGET SCENARIO ===
+{request.ScenarioText}
+
+=== SELECTED TEST DATA CATEGORIES ===
+{categoriesPrompt}
+
+=== INDEXED STEP DEFINITIONS IN TEST SUITE ===
+{stepCatalogSummary}
+
+=== CRITICAL GHERKIN & SPECFLOW RULES ===
+1. Begin with: '  Scenario Outline: <Descriptive Title covering Edge Cases>'
+2. Replace concrete strings and arguments with parameter tags like '<name>', '<email>', '<message>', etc.
+3. Keep step text identical or closely matching the existing SpecFlow step definitions above so no new C# step methods are needed.
+4. Follow with an 'Examples:' table.
+5. In the 'Examples:' table, ALWAYS include a 'CaseDescription' column as the first column describing each test case clearly.
+6. Generate up to {request.MaxExamples} high-value example rows spanning the selected test data categories.
+7. Format table pipes '|' cleanly with proper alignment and spacing.
+8. OUTPUT ONLY THE RAW GHERKIN CODE FOR THE SCENARIO OUTLINE. Do NOT include any markdown code blocks (such as ```gherkin), explanations, or notes.";
+
+            var messages = new List<ChatMessage>
+            {
+                new(ChatRole.System, "You are an automated Gherkin Scenario Outline generator. You output only valid SpecFlow Scenario Outline Gherkin text with Examples tables without markdown formatting or conversational commentary."),
+                new(ChatRole.User, prompt)
+            };
+
+            var response = await chatClient.GetResponseAsync(messages, cancellationToken: cancellationToken);
+            var rawResult = response.Text ?? "";
+
+            var cleanGherkin = SanitizeGherkinOutput(rawResult);
+            if (string.IsNullOrWhiteSpace(cleanGherkin))
+            {
+                return new GenerateOutlineResponse
+                {
+                    Success = false,
+                    ErrorMessage = "LLM returned an empty response."
+                };
+            }
+
+            return new GenerateOutlineResponse
+            {
+                Success = true,
+                GeneratedOutline = cleanGherkin
+            };
+        }
+        catch (OperationCanceledException)
+        {
+            return new GenerateOutlineResponse
+            {
+                Success = false,
+                ErrorMessage = "Generation was cancelled."
+            };
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Failed to generate Scenario Outline.");
+            return new GenerateOutlineResponse
+            {
+                Success = false,
+                ErrorMessage = ex.Message
+            };
+        }
+    }
+
+    public string ReplaceScenarioInGherkin(string fullContent, DetectedScenario targetScenario, string replacementOutline)
+    {
+        var lines = fullContent.Split(new[] { "\r\n", "\r", "\n" }, StringSplitOptions.None).ToList();
+        var startIndex = targetScenario.StartLine - 1;
+        var count = targetScenario.EndLine - targetScenario.StartLine + 1;
+
+        if (startIndex < 0 || startIndex >= lines.Count)
+        {
+            // Fallback: append
+            return fullContent.TrimEnd() + "\n\n" + replacementOutline.Trim() + "\n";
+        }
+
+        var replacementLines = replacementOutline.Split(new[] { "\r\n", "\r", "\n" }, StringSplitOptions.None);
+        lines.RemoveRange(startIndex, Math.Min(count, lines.Count - startIndex));
+        lines.InsertRange(startIndex, replacementLines);
+
+        return string.Join("\n", lines);
+    }
+
+    private static string BuildCategoriesPrompt(EdgeCaseCategoryOptions cats)
+    {
+        var list = new List<string>();
+        if (cats.IncludeHappyPath) list.Add("- Happy Path & Equivalence Classes (standard valid inputs, typical user flows)");
+        if (cats.IncludeBoundaryLimits) list.Add("- Boundary Values & Limits (minimum length, maximum field length boundaries, exact boundary thresholds)");
+        if (cats.IncludeEmptyAndWhitespace) list.Add("- Empty & Missing Values (empty string \"\", whitespace only \"   \", optional vs required fields)");
+        if (cats.IncludeSpecialCharsAndUnicode) list.Add("- Special Characters & Internationalization (accented characters e.g. René, apostrophes O'Connor, punctuation, unicode symbols)");
+        if (cats.IncludeSecuritySanity) list.Add("- Security & Malicious Sanity Inputs (HTML/XSS tags <script>, SQL quotes ' OR '1'='1, directory traversal ../)");
+        if (cats.IncludeMalformedFormats) list.Add("- Malformed & Invalid Formats (invalid email addresses like missing domain, invalid syntax)");
+
+        return list.Count == 0
+            ? "- General edge cases and boundary conditions."
+            : string.Join("\n", list);
+    }
+
+    private static string SanitizeGherkinOutput(string raw)
+    {
+        var cleaned = raw.Trim();
+
+        // Strip markdown code fences if model enclosed response in ```gherkin ... ```
+        if (cleaned.StartsWith("```", StringComparison.OrdinalIgnoreCase))
+        {
+            var firstLineEnd = cleaned.IndexOf('\n');
+            if (firstLineEnd > 0)
+            {
+                cleaned = cleaned.Substring(firstLineEnd + 1);
+            }
+        }
+
+        if (cleaned.EndsWith("```", StringComparison.OrdinalIgnoreCase))
+        {
+            cleaned = cleaned.Substring(0, cleaned.Length - 3);
+        }
+
+        return cleaned.Trim();
+    }
+}

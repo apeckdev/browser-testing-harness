@@ -59,6 +59,10 @@ The harness decouples **AI Agent Exploration & Authoring** from **Automated Test
 - **Step Definition Intelligence & Deduplication**:
   - Automatically scans and indexes all `[Given]`, `[When]`, `[Then]` regex patterns and method signatures across `StepDefinitions/*.cs`.
   - Injects existing step definitions directly into the AI agent prompt and provides a `GetExistingStepCatalog` tool so new tests prioritize reusing existing steps before generating redundant C# bindings.
+- **Data-Driven Testing & AI Scenario Outline Generator**:
+  - One-click conversion of concrete Gherkin scenarios into parameterized `Scenario Outline:` specifications with an AI-generated boundary matrix.
+  - Granular edge-case category toggles: **Happy Path**, **Boundary Limits & Field Lengths**, **Empty & Whitespace**, **Unicode & Internationalization** (`René`, `O'Connor`), **Security Sanity** (HTML/XSS, SQL quotes), and **Malformed Formats**.
+  - Instant in-editor replacement or appending with real-time Gherkin validation.
 - **Visual Execution Modes**:
   - **Headless**: Maximum CI/CD speed.
   - **Visible Browser (Slow-Mo)**: Headed browser execution with 500ms delay per action for visual verification.
