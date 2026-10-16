@@ -932,7 +932,7 @@
                                 @if (_isGeneratingOutline)
                                 {
                                     <span class="spinner-border spinner-border-sm" role="status"></span>
-                                    <span>Generating Boundary Matrix...</span>
+                                    <span>Generating (@_outlineElapsedSeconds.ToString("0.0")s)...</span>
                                 }
                                 else
                                 {
@@ -955,7 +955,19 @@
                                 <label class="form-label small fw-semibold text-secondary mb-0">
                                     <i class="bi bi-code-square me-1 text-info"></i>Generated Scenario Outline:
                                 </label>
-                                @if (!string.IsNullOrWhiteSpace(_generatedOutlineResult))
+                                @if (_isGeneratingOutline)
+                                {
+                                    <div class="d-flex align-items-center gap-2">
+                                        <span class="badge bg-warning bg-opacity-25 text-warning border border-warning border-opacity-50" style="font-size: 0.72rem;">
+                                            <span class="spinner-border spinner-border-sm me-1" style="width: 0.65rem; height: 0.65rem;" role="status"></span>
+                                            Generating (@_outlineElapsedSeconds.ToString("0.0")s)
+                                        </span>
+                                        <button type="button" class="btn btn-xs btn-outline-danger py-0 px-2" style="font-size: 0.7rem;" @onclick="CancelOutlineGeneration">
+                                            <i class="bi bi-x-circle me-1"></i>Cancel
+                                        </button>
+                                    </div>
+                                }
+                                else if (!string.IsNullOrWhiteSpace(_generatedOutlineResult))
                                 {
                                     <span class="badge bg-success bg-opacity-25 text-success border border-success border-opacity-50" style="font-size: 0.72rem;">
                                         <i class="bi bi-check-circle me-1"></i>Ready to Apply
@@ -963,7 +975,25 @@
                                 }
                             </div>
 
-                            @if (string.IsNullOrWhiteSpace(_generatedOutlineResult))
+                            @if (_isGeneratingOutline && string.IsNullOrWhiteSpace(_generatedOutlineResult))
+                            {
+                                <div class="d-flex flex-column align-items-center justify-content-center flex-grow-1 bg-black bg-opacity-40 rounded border border-warning border-opacity-25 p-4 text-center" style="min-height: 320px;">
+                                    <div class="spinner-border text-warning mb-3" style="width: 2.2rem; height: 2.2rem;" role="status">
+                                        <span class="visually-hidden">Loading...</span>
+                                    </div>
+                                    <div class="fw-semibold text-warning mb-1" style="font-size: 0.95rem;">@_outlineStatusPhase</div>
+                                    <div class="small text-secondary mb-3">
+                                        Elapsed: <strong class="text-light">@_outlineElapsedSeconds.ToString("0.0")s</strong> &bull; Model: <span class="text-info">@_currentProviderOverride.ModelId</span>
+                                    </div>
+                                    <div class="progress bg-dark border border-secondary border-opacity-25 mb-3" style="height: 6px; width: 65%;">
+                                        <div class="progress-bar progress-bar-striped progress-bar-animated bg-warning" style="width: 100%"></div>
+                                    </div>
+                                    <div class="text-secondary small fst-italic" style="font-size: 0.78rem;">
+                                        Synthesizing boundary conditions and formatting parameterized SpecFlow Examples table...
+                                    </div>
+                                </div>
+                            }
+                            else if (string.IsNullOrWhiteSpace(_generatedOutlineResult))
                             {
                                 <div class="d-flex flex-column align-items-center justify-content-center flex-grow-1 bg-black bg-opacity-30 rounded border border-secondary border-opacity-25 p-4 text-center text-secondary" style="min-height: 320px;">
                                     <i class="bi bi-grid-3x3-gap display-4 mb-2 opacity-50"></i>
@@ -975,8 +1005,17 @@
                             }
                             else
                             {
-                                <pre class="bg-black p-3 rounded text-info font-monospace small mb-0 border border-info border-opacity-25 flex-grow-1"
-                                     style="min-height: 320px; max-height: 480px; overflow-y: auto; white-space: pre; line-height: 1.5; font-size: 0.82rem;">@_generatedOutlineResult</pre>
+                                <div class="position-relative flex-grow-1 d-flex flex-column">
+                                    @if (_isGeneratingOutline)
+                                    {
+                                        <div class="position-absolute top-0 end-0 m-2 badge bg-dark text-warning border border-warning border-opacity-50 small shadow-sm z-3" style="font-size: 0.72rem;">
+                                            <span class="spinner-grow spinner-grow-sm me-1" style="width: 0.5rem; height: 0.5rem;" role="status"></span>
+                                            Streaming live (@_outlineElapsedSeconds.ToString("0.0")s)...
+                                        </div>
+                                    }
+                                    <pre class="bg-black p-3 rounded text-info font-monospace small mb-0 border border-info border-opacity-25 flex-grow-1"
+                                         style="min-height: 320px; max-height: 480px; overflow-y: auto; white-space: pre; line-height: 1.5; font-size: 0.82rem;">@_generatedOutlineResult<span class="@(_isGeneratingOutline ? "cursor-blink text-warning" : "d-none")">▋</span></pre>
+                                </div>
                             }
                         </div>
                     </div>
@@ -1153,6 +1192,9 @@
     private string _generatedOutlineResult = "";
     private string? _outlineErrorMessage;
     private CancellationTokenSource? _outlineCts;
+    private double _outlineElapsedSeconds;
+    private System.Threading.Timer? _outlineTimer;
+    private string _outlineStatusPhase = "Connecting to AI model...";
 
     private DetectedScenario? CurrentSelectedScenario =>
         _detectedScenarios.Count > 0 && _selectedScenarioIndex >= 0 && _selectedScenarioIndex < _detectedScenarios.Count
@@ -1178,10 +1220,43 @@
         _showOutlineModal = true;
     }
 
-    private void CloseScenarioOutlineModal()
+    private void StartOutlineTimer()
+    {
+        _outlineElapsedSeconds = 0;
+        _outlineTimer?.Dispose();
+        _outlineTimer = new System.Threading.Timer(async _ =>
+        {
+            _outlineElapsedSeconds += 0.2;
+            if (_outlineElapsedSeconds > 2.0 && _outlineStatusPhase.StartsWith("Connecting"))
+            {
+                _outlineStatusPhase = "Synthesizing equivalence classes & boundary limits...";
+            }
+            else if (_outlineElapsedSeconds > 5.0 && _outlineStatusPhase.StartsWith("Synthesizing"))
+            {
+                _outlineStatusPhase = "Formulating Examples data matrix with edge cases...";
+            }
+            await InvokeAsync(StateHasChanged);
+        }, null, 200, 200);
+    }
+
+    private void StopOutlineTimer()
+    {
+        _outlineTimer?.Dispose();
+        _outlineTimer = null;
+    }
+
+    private void CancelOutlineGeneration()
     {
         _outlineCts?.Cancel();
         _isGeneratingOutline = false;
+        _outlineStatusPhase = "Cancelled";
+        StopOutlineTimer();
+        _outlineErrorMessage = "Generation was cancelled.";
+    }
+
+    private void CloseScenarioOutlineModal()
+    {
+        CancelOutlineGeneration();
         _showOutlineModal = false;
     }
 
@@ -1192,6 +1267,8 @@
         _isGeneratingOutline = true;
         _outlineErrorMessage = null;
         _generatedOutlineResult = "";
+        _outlineStatusPhase = "Connecting to AI model & parsing scenario...";
+        StartOutlineTimer();
         _outlineCts = new CancellationTokenSource();
 
         try
@@ -1204,20 +1281,34 @@
                 MaxExamples = _maxExamples
             };
 
-            var res = await ScenarioOutlineService.GenerateOutlineAsync(
+            var hasReceivedChunk = false;
+            await foreach (var chunk in ScenarioOutlineService.StreamGenerateOutlineAsync(
                 req,
                 _selectedProviderKey,
                 _currentProviderOverride,
-                _outlineCts.Token);
-
-            if (res.Success)
+                _outlineCts.Token))
             {
-                _generatedOutlineResult = res.GeneratedOutline;
+                if (!hasReceivedChunk)
+                {
+                    hasReceivedChunk = true;
+                    _outlineStatusPhase = "Streaming Scenario Outline & Examples...";
+                }
+                _generatedOutlineResult += chunk;
+                await InvokeAsync(StateHasChanged);
+            }
+
+            if (string.IsNullOrWhiteSpace(_generatedOutlineResult))
+            {
+                _outlineErrorMessage = "AI model returned an empty response. Please verify your API key and model.";
             }
             else
             {
-                _outlineErrorMessage = res.ErrorMessage;
+                _generatedOutlineResult = ScenarioOutlineService.SanitizeGherkinOutput(_generatedOutlineResult);
             }
+        }
+        catch (OperationCanceledException)
+        {
+            _outlineErrorMessage = "Generation was cancelled.";
         }
         catch (Exception ex)
         {
@@ -1225,6 +1316,7 @@
         }
         finally
         {
+            StopOutlineTimer();
             _isGeneratingOutline = false;
             _outlineCts?.Dispose();
             _outlineCts = null;

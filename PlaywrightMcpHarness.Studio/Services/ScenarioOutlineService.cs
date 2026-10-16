@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using System.Runtime.CompilerServices;
 using System.Text;
 using System.Text.RegularExpressions;
 using System.Threading;
@@ -20,7 +21,13 @@ public interface IScenarioOutlineService
         string? providerKey = null,
         LlmProviderConfig? customOverride = null,
         CancellationToken cancellationToken = default);
+    IAsyncEnumerable<string> StreamGenerateOutlineAsync(
+        GenerateOutlineRequest request,
+        string? providerKey = null,
+        LlmProviderConfig? customOverride = null,
+        CancellationToken cancellationToken = default);
     string ReplaceScenarioInGherkin(string fullContent, DetectedScenario targetScenario, string replacementOutline);
+    string SanitizeGherkinOutput(string raw);
 }
 
 public class ScenarioOutlineService : IScenarioOutlineService
@@ -129,6 +136,53 @@ public class ScenarioOutlineService : IScenarioOutlineService
         return false;
     }
 
+    public async IAsyncEnumerable<string> StreamGenerateOutlineAsync(
+        GenerateOutlineRequest request,
+        string? providerKey = null,
+        LlmProviderConfig? customOverride = null,
+        [EnumeratorCancellation] CancellationToken cancellationToken = default)
+    {
+        var chatClient = _chatClientFactory.CreateClient(providerKey, customOverride);
+        var categoriesPrompt = BuildCategoriesPrompt(request.Categories);
+        var stepCatalogSummary = _stepCatalog.GetCatalogSummaryForPrompt();
+
+        var prompt = $@"You are a Principal QA Automation Architect specializing in SpecFlow and Playwright.
+Convert the following single Gherkin scenario into a comprehensive parameterized 'Scenario Outline:' with an 'Examples:' table covering critical edge cases, boundary conditions, and real-world inputs.
+
+=== TARGET SCENARIO ===
+{request.ScenarioText}
+
+=== SELECTED TEST DATA CATEGORIES ===
+{categoriesPrompt}
+
+=== INDEXED STEP DEFINITIONS IN TEST SUITE ===
+{stepCatalogSummary}
+
+=== CRITICAL GHERKIN & SPECFLOW RULES ===
+1. Begin immediately with: '  Scenario Outline: <Descriptive Title covering Edge Cases>'
+2. Replace concrete strings and arguments with parameter tags like '<name>', '<email>', '<message>', etc.
+3. Keep step text identical or closely matching the existing SpecFlow step definitions above so no new C# step methods are needed.
+4. Follow with an 'Examples:' table.
+5. In the 'Examples:' table, ALWAYS include a 'CaseDescription' column as the first column describing each test case clearly.
+6. Generate up to {request.MaxExamples} high-value example rows spanning the selected test data categories.
+7. Format table pipes '|' cleanly with proper alignment and spacing.
+8. OUTPUT ONLY THE RAW GHERKIN CODE FOR THE SCENARIO OUTLINE. Do NOT include markdown code blocks (```gherkin), introductory banter, or explanations. Start directly with '  Scenario Outline:'.";
+
+        var messages = new List<ChatMessage>
+        {
+            new(ChatRole.System, "You are an automated Gherkin Scenario Outline generator. You output only valid SpecFlow Scenario Outline Gherkin text with Examples tables. Do not include markdown code blocks, conversational commentary, or preamble."),
+            new(ChatRole.User, prompt)
+        };
+
+        await foreach (var update in chatClient.GetStreamingResponseAsync(messages, cancellationToken: cancellationToken))
+        {
+            if (!string.IsNullOrEmpty(update.Text))
+            {
+                yield return update.Text;
+            }
+        }
+    }
+
     public async Task<GenerateOutlineResponse> GenerateOutlineAsync(
         GenerateOutlineRequest request,
         string? providerKey = null,
@@ -154,14 +208,14 @@ Convert the following single Gherkin scenario into a comprehensive parameterized
 {stepCatalogSummary}
 
 === CRITICAL GHERKIN & SPECFLOW RULES ===
-1. Begin with: '  Scenario Outline: <Descriptive Title covering Edge Cases>'
+1. Begin immediately with: '  Scenario Outline: <Descriptive Title covering Edge Cases>'
 2. Replace concrete strings and arguments with parameter tags like '<name>', '<email>', '<message>', etc.
 3. Keep step text identical or closely matching the existing SpecFlow step definitions above so no new C# step methods are needed.
 4. Follow with an 'Examples:' table.
 5. In the 'Examples:' table, ALWAYS include a 'CaseDescription' column as the first column describing each test case clearly.
 6. Generate up to {request.MaxExamples} high-value example rows spanning the selected test data categories.
 7. Format table pipes '|' cleanly with proper alignment and spacing.
-8. OUTPUT ONLY THE RAW GHERKIN CODE FOR THE SCENARIO OUTLINE. Do NOT include any markdown code blocks (such as ```gherkin), explanations, or notes.";
+8. OUTPUT ONLY THE RAW GHERKIN CODE FOR THE SCENARIO OUTLINE. Do NOT include markdown code blocks (```gherkin), introductory banter, or explanations. Start directly with '  Scenario Outline:'.";
 
             var messages = new List<ChatMessage>
             {
@@ -276,7 +330,9 @@ Convert the following single Gherkin scenario into a comprehensive parameterized
             : string.Join("\n", list);
     }
 
-    private static string SanitizeGherkinOutput(string raw)
+    public string SanitizeGherkinOutput(string raw) => CleanGherkinOutput(raw);
+
+    public static string CleanGherkinOutput(string raw)
     {
         var cleaned = raw.Trim();
 
