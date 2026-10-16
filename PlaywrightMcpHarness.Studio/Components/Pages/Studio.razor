@@ -430,46 +430,45 @@
             <!-- Bottom Half: Test Runner Console Output & Detailed Results (flex: 1.2 1 0px; min-height: 0;) -->
             <div class="d-flex flex-column" style="flex: 1.2 1 0px; min-height: 0; position: relative; z-index: 10; background-color: #0d0f12;">
                 <!-- Console Toolbar -->
-                <div class="d-flex align-items-center justify-content-between px-3 py-1 border-bottom border-secondary border-opacity-25 flex-shrink-0"
-                     style="height: 38px; min-height: 38px; background-color: #14171d; position: relative; z-index: 1050; overflow: visible;">
-                    <div class="d-flex align-items-center gap-2">
+                <div class="d-flex align-items-center justify-content-between px-3 py-1 border-bottom border-secondary border-opacity-25 flex-shrink-0 gap-2"
+                     style="height: 38px; min-height: 38px; max-height: 38px; background-color: #14171d; position: relative; z-index: 1050; flex-wrap: nowrap; overflow-x: auto; overflow-y: visible;">
+                    <div class="d-flex align-items-center gap-2 flex-shrink-0 text-nowrap">
                         <i class="bi bi-terminal-fill text-success" style="font-size: 0.85rem;"></i>
-                        <span class="fw-semibold small text-light" style="font-size: 0.82rem;">Test Runner & Results</span>
+                        <span class="fw-bold small text-light text-nowrap" style="font-size: 0.8rem;">Test Runner</span>
                         @if (_isTestRunning)
                         {
-                            <span class="badge bg-success bg-opacity-75 text-light" style="font-size: 0.7rem;">
-                                <span class="spinner-border spinner-border-sm me-1" style="width: 0.6rem; height: 0.6rem;"></span>Running
+                            <span class="badge bg-success bg-opacity-75 text-light text-nowrap py-1 px-2" style="font-size: 0.68rem;">
+                                <span class="spinner-border spinner-border-sm me-1" style="width: 0.55rem; height: 0.55rem;"></span>Running
                             </span>
                         }
                     </div>
 
                     <!-- Live Summary Badges -->
-                    <div class="d-flex align-items-center gap-2">
-                        <span class="badge bg-secondary bg-opacity-50 text-light border border-secondary border-opacity-25" style="font-size: 0.72rem;">
-                            Total: @_testScenarios.Count
+                    <div class="d-flex align-items-center gap-1 flex-shrink-0 text-nowrap">
+                        <span class="badge bg-secondary bg-opacity-50 text-light border border-secondary border-opacity-25 text-nowrap" style="font-size: 0.7rem;">
+                            @_testScenarios.Count Total
                         </span>
-                        <span class="badge bg-success bg-opacity-25 text-success border border-success border-opacity-25" style="font-size: 0.72rem;">
-                            Passed: @_testScenarios.Count(s => s.Passed)
+                        <span class="badge bg-success bg-opacity-25 text-success border border-success border-opacity-25 text-nowrap" style="font-size: 0.7rem;">
+                            @_testScenarios.Count(s => s.Passed) Passed
                         </span>
                         @if (_testScenarios.Any(s => !s.Passed))
                         {
-                            <span class="badge bg-danger bg-opacity-25 text-danger border border-danger border-opacity-25" style="font-size: 0.72rem;">
-                                Failed: @_testScenarios.Count(s => !s.Passed)
+                            <span class="badge bg-danger bg-opacity-25 text-danger border border-danger border-opacity-25 text-nowrap" style="font-size: 0.7rem;">
+                                @_testScenarios.Count(s => !s.Passed) Failed
                             </span>
                         }
                     </div>
 
                     <!-- View Switcher & Actions -->
-                    <div class="d-flex align-items-center gap-2">
+                    <div class="d-flex align-items-center gap-2 flex-shrink-0 text-nowrap">
                         <!-- Playwright Run Settings Dropdown -->
                         <div class="dropdown position-relative">
-                            <button class="btn btn-xs btn-outline-secondary border-opacity-50 dropdown-toggle d-flex align-items-center gap-1 text-light py-1 px-2 shadow-sm"
-                                    title="Playwright Execution Mode, Scope, and Parallel Settings"
+                            <button class="btn btn-xs btn-outline-secondary border-opacity-50 dropdown-toggle d-flex align-items-center gap-1 text-light py-1 px-2 shadow-sm text-nowrap"
+                                    title="Playwright Execution Settings: @GetRunSettingsSummary()"
                                     @onclick="() => _showRunSettingsDropdown = !_showRunSettingsDropdown"
                                     @onclick:stopPropagation="true">
                                 <i class="bi bi-gear-fill text-secondary"></i>
-                                <span style="font-size: 0.73rem;">Settings</span>
-                                <span class="text-secondary" style="font-size: 0.68rem;">(@GetRunSettingsSummary())</span>
+                                <span style="font-size: 0.73rem;">Options</span>
                             </button>
                             @if (_showRunSettingsDropdown)
                             {
@@ -558,17 +557,18 @@
                             </button>
                         }
 
-                        <div class="btn-group btn-group-xs" role="group">
-                            <button type="button" class="btn btn-xs @(_activeConsoleTab == "terminal" ? "btn-secondary text-light fw-semibold" : "btn-outline-secondary text-secondary")"
+                        <!-- Tab Switcher -->
+                        <div class="btn-group btn-group-xs flex-shrink-0" role="group">
+                            <button type="button" class="btn btn-xs text-nowrap py-1 px-2 @(_activeConsoleTab == "terminal" ? "btn-secondary text-light fw-semibold" : "btn-outline-secondary text-secondary")"
                                     @onclick='() => _activeConsoleTab = "terminal"'>
-                                <i class="bi bi-terminal me-1"></i>Detailed Log
+                                <i class="bi bi-terminal me-1"></i>Log
                             </button>
-                            <button type="button" class="btn btn-xs @(_activeConsoleTab == "scenarios" ? "btn-secondary text-light fw-semibold" : "btn-outline-secondary text-secondary")"
+                            <button type="button" class="btn btn-xs text-nowrap py-1 px-2 @(_activeConsoleTab == "scenarios" ? "btn-secondary text-light fw-semibold" : "btn-outline-secondary text-secondary")"
                                     @onclick='() => _activeConsoleTab = "scenarios"'>
                                 <i class="bi bi-check2-circle me-1"></i>Scenarios (@_testScenarios.Count)
                             </button>
                         </div>
-                        <button class="btn btn-xs btn-outline-secondary border-0 text-secondary"
+                        <button class="btn btn-xs btn-outline-secondary border-0 text-secondary text-nowrap py-1 px-2"
                                 title="Clear console output"
                                 @onclick="ClearConsole">
                             <i class="bi bi-trash3"></i> Clear
@@ -606,33 +606,33 @@
                             <div class="d-flex flex-column gap-2">
                                 @foreach (var sc in _testScenarios)
                                 {
-                                    <div class="p-2 px-3 rounded-2 border @(sc.Passed ? "border-success border-opacity-25 bg-success bg-opacity-10" : "border-danger border-opacity-50 bg-danger bg-opacity-10") d-flex flex-column gap-2">
-                                        <div class="d-flex align-items-center justify-content-between">
-                                            <div class="d-flex align-items-center gap-2">
+                                    <div class="p-2 px-3 rounded-2 border @(sc.Passed ? "border-success border-opacity-25 bg-success bg-opacity-10" : "border-danger border-opacity-50 bg-danger bg-opacity-10") d-flex flex-column gap-2" style="min-width: 0;">
+                                        <div class="d-flex align-items-center justify-content-between gap-3" style="min-width: 0;">
+                                            <div class="d-flex align-items-center gap-2 flex-grow-1" style="min-width: 0; overflow: hidden;">
                                                 @if (sc.Passed)
                                                 {
-                                                    <i class="bi bi-check-circle-fill text-success fs-6"></i>
+                                                    <i class="bi bi-check-circle-fill text-success fs-6 flex-shrink-0"></i>
                                                 }
                                                 else
                                                 {
-                                                    <i class="bi bi-x-circle-fill text-danger fs-6"></i>
+                                                    <i class="bi bi-x-circle-fill text-danger fs-6 flex-shrink-0"></i>
                                                 }
-                                                <span class="fw-semibold text-light small">@sc.Name</span>
+                                                <span class="fw-semibold text-light small text-truncate" title="@sc.Name">@FormatScenarioDisplayName(sc.Name)</span>
                                                 @if (!string.IsNullOrEmpty(sc.ErrorMessage))
                                                 {
-                                                    <span class="text-danger small ms-2">(@sc.ErrorMessage)</span>
+                                                    <span class="text-danger small ms-1 text-truncate flex-shrink-1" title="@sc.ErrorMessage">(@sc.ErrorMessage)</span>
                                                 }
                                             </div>
-                                            <div class="d-flex align-items-center gap-2">
+                                            <div class="d-flex align-items-center gap-2 flex-shrink-0 ms-auto text-nowrap">
                                                 @if (!string.IsNullOrEmpty(sc.TraceFileName))
                                                 {
-                                                    <button class="btn btn-xs btn-outline-info d-flex align-items-center gap-1 py-0 px-2"
+                                                    <button class="btn btn-xs btn-outline-info d-flex align-items-center gap-1 py-0 px-2 text-nowrap"
                                                             title="Launch interactive Playwright Trace Viewer GUI"
                                                             @onclick="() => OpenTraceForScenario(sc)">
                                                         <i class="bi bi-play-circle"></i> Trace
                                                     </button>
                                                     <a href="/test-artifacts/traces/@sc.TraceFileName" download
-                                                       class="btn btn-xs btn-outline-secondary py-0 px-2 text-decoration-none"
+                                                       class="btn btn-xs btn-outline-secondary py-0 px-2 text-decoration-none text-nowrap"
                                                        title="Download trace .zip file">
                                                         <i class="bi bi-download"></i>
                                                     </a>
@@ -641,7 +641,7 @@
                                                 {
                                                     @if (!string.IsNullOrEmpty(sc.ScreenshotFileName))
                                                     {
-                                                        <button class="btn btn-xs btn-outline-warning d-flex align-items-center gap-1 py-0 px-2"
+                                                        <button class="btn btn-xs btn-outline-warning d-flex align-items-center gap-1 py-0 px-2 text-nowrap"
                                                                 title="View Failure Screenshot"
                                                                 @onclick="() => PreviewScreenshot(sc)">
                                                             <i class="bi bi-image"></i> Screenshot
@@ -649,7 +649,7 @@
                                                     }
                                                     @if (!string.IsNullOrEmpty(sc.VisualDiffSnapshotName))
                                                     {
-                                                        <button class="btn btn-xs btn-outline-danger d-flex align-items-center gap-1 py-0 px-2"
+                                                        <button class="btn btn-xs btn-outline-danger d-flex align-items-center gap-1 py-0 px-2 text-nowrap"
                                                                 title="View Visual Diff & Golden Baseline Comparison"
                                                                 @onclick="() => OpenVisualDiffForScenario(sc.VisualDiffSnapshotName)">
                                                             <i class="bi bi-images"></i> Visual Diff
@@ -659,7 +659,7 @@
                                                             }
                                                         </button>
                                                     }
-                                                    <button class="btn btn-xs btn-outline-danger d-flex align-items-center gap-1 py-0 px-2"
+                                                    <button class="btn btn-xs btn-outline-danger d-flex align-items-center gap-1 py-0 px-2 text-nowrap"
                                                             title="Send this scenario failure to AI Agent to diagnose and fix"
                                                             @onclick="() => SendScenarioFailureToAgent(sc)"
                                                             disabled="@(_isAgentBusy || _isTestRunning)">
@@ -668,9 +668,9 @@
                                                 }
                                                 @if (!string.IsNullOrEmpty(sc.Duration))
                                                 {
-                                                    <span class="badge bg-dark text-secondary border border-secondary border-opacity-25" style="font-size: 0.72rem;">@sc.Duration</span>
+                                                    <span class="badge bg-dark text-secondary border border-secondary border-opacity-25 text-nowrap" style="font-size: 0.72rem;">@sc.Duration</span>
                                                 }
-                                                <span class="badge @(sc.Passed ? "bg-success" : "bg-danger") text-light" style="font-size: 0.72rem;">
+                                                <span class="badge @(sc.Passed ? "bg-success" : "bg-danger") text-light text-nowrap" style="font-size: 0.72rem;">
                                                     @(sc.Passed ? "Passed" : "Failed")
                                                 </span>
                                             </div>
@@ -2325,6 +2325,22 @@
         var scope = _targetScope == "selected" ? "File" : "All";
         var concurrency = _runInParallel ? "Parallel" : "Seq";
         return $"{mode} • {scope} • {concurrency}";
+    }
+
+    private static string FormatScenarioDisplayName(string rawName)
+    {
+        if (string.IsNullOrWhiteSpace(rawName))
+        {
+            return "Unnamed Scenario";
+        }
+
+        var parts = rawName.Split('.');
+        if (parts.Length > 2)
+        {
+            return $"{parts[^2]}.{parts[^1]}";
+        }
+
+        return rawName;
     }
 
     private bool HasTestFailures =>
