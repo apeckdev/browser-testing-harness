@@ -112,6 +112,11 @@ The harness decouples **AI Agent Exploration & Authoring** from **Automated Test
 - **Live Output & Scenario Analytics**:
   - In-browser terminal stream with clean ANSI formatting and auto-scroll controls.
   - Dedicated **Scenarios** tab breaking down pass/fail counts, execution duration, and failure reasons.
+- **CI/CD Pipeline Exporter**:
+  - Dedicated interactive exporter accessible directly from the **Tools** dropdown.
+  - Full support for major CI/CD engines: **GitHub Actions** (`.github/workflows/playwright-tests.yml`), **Azure DevOps** (`azure-pipelines.yml`), **GitLab CI** (`.gitlab-ci.yml`), **Docker** (`Dockerfile.test` & `docker-compose.test.yml`), and standalone CLI execution scripts (**PowerShell** `run-tests.ps1` & **POSIX Bash** `run-tests.sh`).
+  - Configurable parameters: Trigger branch, Chromium vs. all browsers, parallel vs. sequential execution, artifact archiving (Playwright traces, failure screenshots, visual diffs), test report publishing (TRX / JUnit), and nightly cron triggers.
+  - One-click **Copy to Clipboard** and **Download File** capabilities.
 
 ---
 

@@ -9,6 +9,7 @@
 @inject ILocatorHealthService LocatorHealthService
 @inject IPageObjectService PageObjectService
 @inject IVisualSnapshotService VisualSnapshotService
+@inject PipelineExportService PipelineExporter
 @inject IOptions<HarnessConfig> ConfigOptions
 @inject IJSRuntime JS
 
@@ -378,6 +379,13 @@
                                                 <i class="bi bi-layers text-secondary"></i> Page Objects
                                             </span>
                                             <span class="badge bg-secondary bg-opacity-50 text-light rounded-pill">@(_pageObjects.Count)</span>
+                                        </button>
+                                        <button class="dropdown-item d-flex align-items-center justify-content-between px-3 py-1 text-light"
+                                                @onclick="() => { _showToolsDropdown = false; OpenPipelineExportModal(); }">
+                                            <span class="d-flex align-items-center gap-2">
+                                                <i class="bi bi-cloud-arrow-up text-primary"></i> Export CI/CD Pipeline
+                                            </span>
+                                            <span class="badge bg-primary bg-opacity-25 text-primary rounded-pill">CI/CD</span>
                                         </button>
 
                                         @if (_selectedFilePath.EndsWith(".feature", StringComparison.OrdinalIgnoreCase) || _selectedFilePath.EndsWith("Steps.cs", StringComparison.OrdinalIgnoreCase))
@@ -2260,6 +2268,203 @@
     </div>
 }
 
+<!-- Modal: Export CI/CD Pipeline -->
+@if (_showPipelineExportModal)
+{
+    <div class="modal fade show d-block" tabindex="-1" style="background-color: rgba(0,0,0,0.75); z-index: 1050;">
+        <div class="modal-dialog modal-xl modal-dialog-centered" style="max-width: 1100px;">
+            <div class="modal-content bg-dark text-light border-secondary border-opacity-50 shadow-lg" style="height: 85vh; display: flex; flex-direction: column;">
+                <!-- Modal Header -->
+                <div class="modal-header border-secondary border-opacity-50 py-2 px-3 flex-shrink-0 d-flex align-items-center justify-content-between" style="background-color: #171920;">
+                    <div class="d-flex align-items-center gap-2">
+                        <i class="bi bi-cloud-arrow-up text-primary fs-5"></i>
+                        <div>
+                            <h5 class="modal-title fs-6 fw-bold text-white mb-0">CI/CD Pipeline Exporter</h5>
+                            <div class="text-secondary" style="font-size: 0.72rem;">Generate production-ready CI workflows, container configurations, and execution scripts</div>
+                        </div>
+                    </div>
+                    <button type="button" class="btn-close btn-close-white" aria-label="Close" @onclick="ClosePipelineExportModal"></button>
+                </div>
+
+                <!-- Modal Body: Left Sidebar (Controls) + Right Content (Code Preview) -->
+                <div class="modal-body p-0 d-flex flex-grow-1 overflow-hidden">
+                    <!-- Left Sidebar: Platform Selector & Config Options -->
+                    <div class="p-3 border-end border-secondary border-opacity-25 d-flex flex-column gap-3 overflow-auto" style="width: 330px; min-width: 330px; background-color: #111317;">
+                        <!-- Platform Selector -->
+                        <div>
+                            <label class="form-label text-secondary fw-bold text-uppercase mb-2" style="font-size: 0.68rem; letter-spacing: 0.5px;">Platform / Format</label>
+                            <div class="d-flex flex-column gap-1">
+                                <button type="button" class="btn btn-sm text-start d-flex align-items-center justify-content-between px-3 py-2 @(_pipelineOptions.Platform == PipelinePlatform.GitHubActions ? "btn-primary shadow-sm" : "btn-dark text-secondary border border-secondary border-opacity-25")"
+                                        @onclick="() => SetPipelinePlatform(PipelinePlatform.GitHubActions)">
+                                    <span class="d-flex align-items-center gap-2">
+                                        <i class="bi bi-github fs-6"></i>
+                                        <span class="fw-semibold">GitHub Actions</span>
+                                    </span>
+                                    <span class="badge @(_pipelineOptions.Platform == PipelinePlatform.GitHubActions ? "bg-light text-primary" : "bg-secondary bg-opacity-25 text-secondary")" style="font-size: 0.65rem;">YAML</span>
+                                </button>
+                                <button type="button" class="btn btn-sm text-start d-flex align-items-center justify-content-between px-3 py-2 @(_pipelineOptions.Platform == PipelinePlatform.AzureDevOps ? "btn-primary shadow-sm" : "btn-dark text-secondary border border-secondary border-opacity-25")"
+                                        @onclick="() => SetPipelinePlatform(PipelinePlatform.AzureDevOps)">
+                                    <span class="d-flex align-items-center gap-2">
+                                        <i class="bi bi-microsoft fs-6"></i>
+                                        <span class="fw-semibold">Azure DevOps</span>
+                                    </span>
+                                    <span class="badge @(_pipelineOptions.Platform == PipelinePlatform.AzureDevOps ? "bg-light text-primary" : "bg-secondary bg-opacity-25 text-secondary")" style="font-size: 0.65rem;">YAML</span>
+                                </button>
+                                <button type="button" class="btn btn-sm text-start d-flex align-items-center justify-content-between px-3 py-2 @(_pipelineOptions.Platform == PipelinePlatform.GitLabCI ? "btn-primary shadow-sm" : "btn-dark text-secondary border border-secondary border-opacity-25")"
+                                        @onclick="() => SetPipelinePlatform(PipelinePlatform.GitLabCI)">
+                                    <span class="d-flex align-items-center gap-2">
+                                        <i class="bi bi-gitlab fs-6 text-danger"></i>
+                                        <span class="fw-semibold">GitLab CI</span>
+                                    </span>
+                                    <span class="badge @(_pipelineOptions.Platform == PipelinePlatform.GitLabCI ? "bg-light text-primary" : "bg-secondary bg-opacity-25 text-secondary")" style="font-size: 0.65rem;">YAML</span>
+                                </button>
+                                <button type="button" class="btn btn-sm text-start d-flex align-items-center justify-content-between px-3 py-2 @(_pipelineOptions.Platform == PipelinePlatform.Docker ? "btn-primary shadow-sm" : "btn-dark text-secondary border border-secondary border-opacity-25")"
+                                        @onclick="() => SetPipelinePlatform(PipelinePlatform.Docker)">
+                                    <span class="d-flex align-items-center gap-2">
+                                        <i class="bi bi-box fs-6 text-info"></i>
+                                        <span class="fw-semibold">Dockerfile</span>
+                                    </span>
+                                    <span class="badge @(_pipelineOptions.Platform == PipelinePlatform.Docker ? "bg-light text-primary" : "bg-secondary bg-opacity-25 text-secondary")" style="font-size: 0.65rem;">Container</span>
+                                </button>
+                                <button type="button" class="btn btn-sm text-start d-flex align-items-center justify-content-between px-3 py-2 @(_pipelineOptions.Platform == PipelinePlatform.DockerCompose ? "btn-primary shadow-sm" : "btn-dark text-secondary border border-secondary border-opacity-25")"
+                                        @onclick="() => SetPipelinePlatform(PipelinePlatform.DockerCompose)">
+                                    <span class="d-flex align-items-center gap-2">
+                                        <i class="bi bi-boxes fs-6 text-warning"></i>
+                                        <span class="fw-semibold">Docker Compose</span>
+                                    </span>
+                                    <span class="badge @(_pipelineOptions.Platform == PipelinePlatform.DockerCompose ? "bg-light text-primary" : "bg-secondary bg-opacity-25 text-secondary")" style="font-size: 0.65rem;">Compose</span>
+                                </button>
+                                <button type="button" class="btn btn-sm text-start d-flex align-items-center justify-content-between px-3 py-2 @(_pipelineOptions.Platform == PipelinePlatform.PowerShellScript ? "btn-primary shadow-sm" : "btn-dark text-secondary border border-secondary border-opacity-25")"
+                                        @onclick="() => SetPipelinePlatform(PipelinePlatform.PowerShellScript)">
+                                    <span class="d-flex align-items-center gap-2">
+                                        <i class="bi bi-terminal fs-6 text-primary"></i>
+                                        <span class="fw-semibold">PowerShell Runner</span>
+                                    </span>
+                                    <span class="badge @(_pipelineOptions.Platform == PipelinePlatform.PowerShellScript ? "bg-light text-primary" : "bg-secondary bg-opacity-25 text-secondary")" style="font-size: 0.65rem;">.ps1</span>
+                                </button>
+                                <button type="button" class="btn btn-sm text-start d-flex align-items-center justify-content-between px-3 py-2 @(_pipelineOptions.Platform == PipelinePlatform.BashScript ? "btn-primary shadow-sm" : "btn-dark text-secondary border border-secondary border-opacity-25")"
+                                        @onclick="() => SetPipelinePlatform(PipelinePlatform.BashScript)">
+                                    <span class="d-flex align-items-center gap-2">
+                                        <i class="bi bi-terminal-split fs-6 text-success"></i>
+                                        <span class="fw-semibold">Bash Runner</span>
+                                    </span>
+                                    <span class="badge @(_pipelineOptions.Platform == PipelinePlatform.BashScript ? "bg-light text-primary" : "bg-secondary bg-opacity-25 text-secondary")" style="font-size: 0.65rem;">.sh</span>
+                                </button>
+                            </div>
+                        </div>
+
+                        <!-- Configuration Options -->
+                        <div class="border-top border-secondary border-opacity-25 pt-3 d-flex flex-column gap-3">
+                            <div>
+                                <label class="form-label text-secondary fw-semibold mb-1" style="font-size: 0.75rem;">Trigger Branch</label>
+                                <input type="text" class="form-control form-control-sm bg-dark text-light border-secondary border-opacity-50"
+                                       @bind="_pipelineOptions.BranchName" @bind:after="UpdatePipelinePreview" placeholder="main" />
+                            </div>
+
+                            <div>
+                                <label class="form-label text-secondary fw-semibold mb-1" style="font-size: 0.75rem;">Browser Scope</label>
+                                <select class="form-select form-select-sm bg-dark text-light border-secondary border-opacity-50"
+                                        @bind="_pipelineOptions.InstallAllBrowsers" @bind:after="UpdatePipelinePreview">
+                                    <option value="false">Chromium Only (Fast CI execution)</option>
+                                    <option value="true">All Browsers (Chromium, Firefox, WebKit)</option>
+                                </select>
+                            </div>
+
+                            <div class="form-check form-switch m-0">
+                                <input class="form-check-input" type="checkbox" id="pipelineParallelSwitch"
+                                       @bind="_pipelineOptions.RunInParallel" @bind:after="UpdatePipelinePreview" />
+                                <label class="form-check-label text-light small" for="pipelineParallelSwitch">Parallel Execution</label>
+                                <div class="text-secondary" style="font-size: 0.68rem;">Run test collections concurrently</div>
+                            </div>
+
+                            <div class="form-check form-switch m-0">
+                                <input class="form-check-input" type="checkbox" id="pipelineArtifactsSwitch"
+                                       @bind="_pipelineOptions.UploadArtifacts" @bind:after="UpdatePipelinePreview" />
+                                <label class="form-check-label text-light small" for="pipelineArtifactsSwitch">Archive Test Artifacts</label>
+                                <div class="text-secondary" style="font-size: 0.68rem;">Upload traces, failure screenshots, and visual diffs</div>
+                            </div>
+
+                            <div class="form-check form-switch m-0">
+                                <input class="form-check-input" type="checkbox" id="pipelineResultsSwitch"
+                                       @bind="_pipelineOptions.CollectTestResults" @bind:after="UpdatePipelinePreview" />
+                                <label class="form-check-label text-light small" for="pipelineResultsSwitch">Publish Test Reports</label>
+                                <div class="text-secondary" style="font-size: 0.68rem;">Generate TRX / JUnit reports</div>
+                            </div>
+
+                            <div class="border-top border-secondary border-opacity-25 pt-2">
+                                <div class="form-check form-switch m-0 mb-1">
+                                    <input class="form-check-input" type="checkbox" id="pipelineCronSwitch"
+                                           @bind="_pipelineOptions.EnableCronSchedule" @bind:after="UpdatePipelinePreview" />
+                                    <label class="form-check-label text-light small" for="pipelineCronSwitch">Nightly Cron Trigger</label>
+                                </div>
+                                @if (_pipelineOptions.EnableCronSchedule)
+                                {
+                                    <input type="text" class="form-control form-control-sm bg-dark text-light border-secondary border-opacity-50 mt-1"
+                                           @bind="_pipelineOptions.CronExpression" @bind:after="UpdatePipelinePreview" placeholder="0 2 * * *" />
+                                    <div class="text-secondary" style="font-size: 0.65rem;">Runs at 02:00 UTC every night</div>
+                                }
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Right Main Content: Code Preview & Metadata -->
+                    <div class="d-flex flex-column flex-grow-1 overflow-hidden" style="background-color: #0d0f12;">
+                        <!-- Preview Header Bar -->
+                        <div class="d-flex align-items-center justify-content-between px-3 py-2 border-bottom border-secondary border-opacity-25 flex-shrink-0" style="background-color: #14171d;">
+                            <div class="d-flex align-items-center gap-2">
+                                <span class="badge bg-secondary bg-opacity-50 text-light border border-secondary border-opacity-25 px-2 py-1" style="font-family: 'JetBrains Mono', monospace; font-size: 0.75rem;">
+                                    <i class="bi bi-file-earmark-code me-1 text-info"></i>@_currentPipelineResult?.SuggestedRelativePath
+                                </span>
+                                <span class="text-secondary small d-none d-md-inline">@_currentPipelineResult?.Description</span>
+                            </div>
+                            <div class="d-flex align-items-center gap-2">
+                                @if (_copyFeedback)
+                                {
+                                    <span class="badge bg-success text-light d-flex align-items-center gap-1 py-1 px-2">
+                                        <i class="bi bi-check2"></i> Copied to Clipboard!
+                                    </span>
+                                }
+                                <button class="btn btn-xs btn-outline-info d-flex align-items-center gap-1 py-1 px-2"
+                                        title="Copy code to clipboard"
+                                        @onclick="CopyPipelineToClipboard">
+                                    <i class="bi bi-clipboard"></i> Copy
+                                </button>
+                                <button class="btn btn-xs btn-success d-flex align-items-center gap-1 py-1 px-2 shadow-sm"
+                                        title="Download file to your computer"
+                                        @onclick="DownloadPipelineFile">
+                                    <i class="bi bi-download"></i> Download
+                                </button>
+                            </div>
+                        </div>
+
+                        <!-- Code Content -->
+                        <div class="p-3 flex-grow-1 overflow-auto" style="font-family: 'JetBrains Mono', Consolas, monospace; font-size: 0.82rem; line-height: 1.5; color: #e6edf3; background-color: #0b0c0e;">
+                            <pre class="m-0" style="white-space: pre-wrap; word-break: break-all;"><code>@_currentPipelineResult?.Content</code></pre>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Modal Footer -->
+                <div class="modal-footer border-secondary border-opacity-50 py-2 d-flex justify-content-between flex-shrink-0" style="background-color: #14171d;">
+                    <div class="small text-secondary">
+                        <i class="bi bi-shield-check text-success me-1"></i>
+                        Ready to commit into your source control or place in your CI/CD repository root.
+                    </div>
+                    <div class="d-flex align-items-center gap-2">
+                        <button type="button" class="btn btn-sm btn-outline-info d-flex align-items-center gap-1" @onclick="CopyPipelineToClipboard">
+                            <i class="bi bi-clipboard"></i> Copy to Clipboard
+                        </button>
+                        <button type="button" class="btn btn-sm btn-success d-flex align-items-center gap-1 shadow-sm" @onclick="DownloadPipelineFile">
+                            <i class="bi bi-download"></i> Download File
+                        </button>
+                        <button type="button" class="btn btn-sm btn-secondary ms-2" @onclick="ClosePipelineExportModal">Close</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+}
+
 <style>
     .cursor-blink {
         display: inline-block;
@@ -3917,6 +4122,57 @@
             return "text-secondary fst-italic";
         }
         return "text-light text-opacity-75";
+    }
+
+    private bool _showPipelineExportModal = false;
+    private PipelineExportOptions _pipelineOptions = new();
+    private PipelineExportResult? _currentPipelineResult;
+    private bool _copyFeedback = false;
+
+    private void OpenPipelineExportModal()
+    {
+        _pipelineOptions.VisualTolerancePercent = _config.VisualTolerancePercent;
+        _pipelineOptions.RunInParallel = _runInParallel;
+        UpdatePipelinePreview();
+        _showPipelineExportModal = true;
+    }
+
+    private void ClosePipelineExportModal()
+    {
+        _showPipelineExportModal = false;
+        _copyFeedback = false;
+    }
+
+    private void SetPipelinePlatform(PipelinePlatform platform)
+    {
+        _pipelineOptions.Platform = platform;
+        UpdatePipelinePreview();
+    }
+
+    private void UpdatePipelinePreview()
+    {
+        _currentPipelineResult = PipelineExporter.GeneratePipeline(_pipelineOptions);
+        StateHasChanged();
+    }
+
+    private async Task CopyPipelineToClipboard()
+    {
+        if (_currentPipelineResult == null) return;
+        await JS.InvokeVoidAsync("studioUi.copyToClipboard", _currentPipelineResult.Content);
+        _copyFeedback = true;
+        StateHasChanged();
+        _ = Task.Run(async () =>
+        {
+            await Task.Delay(2500);
+            _copyFeedback = false;
+            await InvokeAsync(StateHasChanged);
+        });
+    }
+
+    private async Task DownloadPipelineFile()
+    {
+        if (_currentPipelineResult == null) return;
+        await JS.InvokeVoidAsync("studioUi.downloadFile", _currentPipelineResult.SuggestedFileName, _currentPipelineResult.Content);
     }
 
     public void Dispose()

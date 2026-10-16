@@ -18,6 +18,7 @@ builder.Services.AddSingleton<IScenarioOutlineService, ScenarioOutlineService>()
 builder.Services.AddSingleton<ILocatorHealthService, LocatorHealthService>();
 builder.Services.AddSingleton<IPageObjectService, PageObjectService>();
 builder.Services.AddSingleton<IVisualSnapshotService, VisualSnapshotService>();
+builder.Services.AddSingleton<PipelineExportService>();
 builder.Services.AddScoped<IMcpAgentService, McpAgentService>();
 builder.Services.AddSingleton<ITestRunnerService, TestRunnerService>();
 
