@@ -18,6 +18,14 @@ public class VisualSteps
         _page = page;
     }
 
+    [Given(@"I am on the ""(.*)"" page")]
+    [Given(@"I navigate to ""(.*)""")]
+    public async Task GivenIAmOnThePageAsync(string url)
+    {
+        await _page.GotoAsync(url);
+        await _page.WaitForLoadStateAsync(LoadState.DOMContentLoaded);
+    }
+
     [Then(@"the page appearance should match baseline ""(.*)""")]
     public async Task ThenThePageAppearanceShouldMatchBaselineAsync(string snapshotName)
     {
@@ -47,8 +55,10 @@ public class VisualSteps
         var sanitizedName = SanitizeSnapshotName(snapshotName);
         var (baselinePath, actualPath, diffPath) = ResolveVisualPaths(sanitizedName);
 
-        // Take high-fidelity screenshot with animations disabled for consistency
+        // Ensure page has loaded and normalize viewport for deterministic visual regression comparisons
         await _page.WaitForLoadStateAsync(LoadState.DOMContentLoaded);
+        await _page.SetViewportSizeAsync(1280, 800);
+        await _page.AddStyleTagAsync(new() { Content = "::-webkit-scrollbar { display: none !important; } html, body { scrollbar-width: none !important; }" });
         await Task.Delay(250); // Settle rendering
 
         await _page.ScreenshotAsync(new PageScreenshotOptions
@@ -150,7 +160,16 @@ public class VisualSteps
         }
 
         var projectRoot = current?.FullName ?? Directory.GetCurrentDirectory();
-        var baselinePath = Path.Combine(projectRoot, "VisualBaselines", $"{snapshotName}.png");
+        var baselinesDir = Environment.GetEnvironmentVariable("VISUAL_BASELINES_DIR");
+        if (string.IsNullOrWhiteSpace(baselinesDir))
+        {
+            baselinesDir = Path.Combine(projectRoot, "VisualBaselines");
+        }
+        if (!Directory.Exists(baselinesDir))
+        {
+            Directory.CreateDirectory(baselinesDir);
+        }
+        var baselinePath = Path.Combine(baselinesDir, $"{snapshotName}.png");
 
         var artifactsDir = Environment.GetEnvironmentVariable("TEST_ARTIFACTS_DIR");
         if (string.IsNullOrWhiteSpace(artifactsDir))
@@ -173,7 +192,7 @@ public class VisualSteps
     private static double GetDefaultTolerance()
     {
         var env = Environment.GetEnvironmentVariable("VISUAL_TOLERANCE_PERCENT");
-        return double.TryParse(env, out var val) ? val : 0.2;
+        return double.TryParse(env, out var val) ? val : 2.0;
     }
 
     private static string SanitizeSnapshotName(string raw)

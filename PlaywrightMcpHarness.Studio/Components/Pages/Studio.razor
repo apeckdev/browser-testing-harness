@@ -84,40 +84,6 @@
                 <i class="bi bi-gear-fill"></i> Settings
             </button>
 
-            <!-- Visual Execution Mode Selector -->
-            <div class="input-group input-group-sm" style="width: 210px;">
-                <span class="input-group-text bg-dark text-secondary border-secondary border-opacity-50 px-2">
-                    <i class="bi bi-eye"></i>
-                </span>
-                <select class="form-select bg-dark text-light border-secondary border-opacity-50 py-1" @bind="_selectedVisualMode">
-                    <option value="@VisualExecutionMode.HeadedSlowMo">Visible Browser (Slow 1s)</option>
-                    <option value="@VisualExecutionMode.HeadedNormal">Visible Browser (Full)</option>
-                    <option value="@VisualExecutionMode.Headless">Headless (Background)</option>
-                    <option value="@VisualExecutionMode.Inspector">Playwright Inspector</option>
-                </select>
-            </div>
-
-            <!-- Target Scope: All Features vs Selected Feature -->
-            <div class="input-group input-group-sm" style="width: 155px;">
-                <span class="input-group-text bg-dark text-secondary border-secondary border-opacity-50 px-2" title="Test Execution Scope">
-                    <i class="bi bi-bullseye"></i>
-                </span>
-                <select class="form-select bg-dark text-light border-secondary border-opacity-50 py-1" @bind="_targetScope">
-                    <option value="all">All Features</option>
-                    <option value="selected">Selected File</option>
-                </select>
-            </div>
-
-            <!-- Parallel vs Sequential Switch -->
-            <div class="form-check form-switch d-flex align-items-center gap-1 text-light small px-2 py-1 border border-secondary border-opacity-25 rounded bg-dark"
-                 title="@(_runInParallel ? "Parallel: Tests run concurrently across multiple browser windows" : "Sequential: Tests run one at a time in a single browser window")"
-                 style="height: 31px;">
-                <input class="form-check-input ms-0 me-1 mt-0" type="checkbox" role="switch" id="parallelSwitch" @bind="_runInParallel" />
-                <label class="form-check-label text-nowrap user-select-none" for="parallelSwitch" style="font-size: 0.72rem; cursor: pointer;">
-                    @(_runInParallel ? "Parallel" : "Sequential")
-                </label>
-            </div>
-
             <!-- Run Tests Button -->
             @if (_isTestRunning)
             {
@@ -351,70 +317,92 @@
                                 </button>
                             }
 
-                            <!-- Step Catalog Button -->
-                            <button class="btn btn-sm btn-outline-info d-flex align-items-center gap-1 py-0 px-2 text-nowrap"
-                                    title="Explore and insert reusable SpecFlow step definitions"
-                                    @onclick="OpenStepCatalogModal">
-                                <i class="bi bi-collection"></i>
-                                <span class="d-none d-sm-inline" style="font-size: 0.75rem;">Step Catalog</span>
-                                <span class="badge bg-info bg-opacity-25 text-info rounded-pill px-1" style="font-size: 0.7rem;">@StepCatalog.Steps.Count</span>
-                            </button>
-
-                            <!-- Locator Health & Best Practices Linter Button -->
-                            <button class="btn btn-sm d-flex align-items-center gap-1 py-0 px-2 text-nowrap @GetLocatorHealthButtonClass()"
-                                    title="Inspect Playwright locator resilience, linter findings, and auto-heal fragile selectors"
-                                    @onclick="OpenLocatorHealthModal">
-                                <i class="bi @GetLocatorHealthIconClass()"></i>
-                                <span class="d-none d-sm-inline" style="font-size: 0.75rem;">Locator Health</span>
-                                <span class="badge @GetLocatorHealthBadgeClass() rounded-pill px-1" style="font-size: 0.7rem;">@(_locatorReport?.OverallScore ?? 100)% (@(_locatorReport?.HealthGrade ?? "A+"))</span>
-                            </button>
-
-                            @if (_selectedFilePath.EndsWith(".feature", StringComparison.OrdinalIgnoreCase))
-                            {
-                                <!-- AI Edge-Case & Outline Generator Button -->
-                                <button class="btn btn-sm btn-outline-warning d-flex align-items-center gap-1 py-0 px-2 text-nowrap"
-                                        title="Convert scenario to Scenario Outline with AI-generated boundary cases & test data matrix"
-                                        @onclick="OpenScenarioOutlineModal">
-                                    <i class="bi bi-grid-3x3-gap-fill"></i>
-                                    <span class="d-none d-sm-inline" style="font-size: 0.75rem;">Generate Edge Cases</span>
+                            <!-- Suite Tools Dropdown -->
+                            <div class="dropdown position-relative">
+                                <button class="btn btn-sm btn-outline-info dropdown-toggle d-flex align-items-center gap-1 py-0 px-2"
+                                        title="Suite Tools, Catalogs, and Code Generators"
+                                        @onclick="() => _showToolsDropdown = !_showToolsDropdown"
+                                        @onclick:stopPropagation="true">
+                                    <i class="bi bi-tools"></i>
+                                    <span style="font-size: 0.75rem;">Tools</span>
+                                    @if (_visualSnapshots.Any(s => s.HasDiff))
+                                    {
+                                        <span class="badge bg-danger rounded-pill px-1" style="font-size: 0.65rem;">@(_visualSnapshots.Count(s => s.HasDiff)) diff</span>
+                                    }
+                                    else if (_locatorReport != null && _locatorReport.OverallScore < 85)
+                                    {
+                                        <span class="badge bg-warning text-dark rounded-pill px-1" style="font-size: 0.65rem;">@(_locatorReport.HealthGrade)</span>
+                                    }
                                 </button>
-                            }
-
-                            @if (_selectedFilePath.EndsWith("Steps.cs", StringComparison.OrdinalIgnoreCase))
-                            {
-                                <!-- AI Extract Page Object Button -->
-                                <button class="btn btn-sm btn-outline-primary d-flex align-items-center gap-1 py-0 px-2 text-nowrap"
-                                        title="Refactor step definition and extract reusable Page Object with AI"
-                                        @onclick="OpenExtractPageObjectModal">
-                                    <i class="bi bi-box-arrow-up-right"></i>
-                                    <span class="d-none d-sm-inline" style="font-size: 0.75rem;">Extract Page Object</span>
-                                </button>
-                            }
-
-                            <!-- Page Objects Catalog Button -->
-                            <button class="btn btn-sm btn-outline-secondary d-flex align-items-center gap-1 py-0 px-2 text-nowrap"
-                                    title="View Page Objects catalog, methods, and locators"
-                                    @onclick="OpenPageObjectCatalogModal">
-                                <i class="bi bi-layers"></i>
-                                <span class="d-none d-sm-inline" style="font-size: 0.75rem;">Page Objects</span>
-                                <span class="badge bg-secondary bg-opacity-50 text-light rounded-pill px-1" style="font-size: 0.7rem;">@(_pageObjects.Count)</span>
-                            </button>
-
-                            <!-- Visual Baselines & Regression Inspector Button -->
-                            <button class="btn btn-sm btn-outline-danger d-flex align-items-center gap-1 py-0 px-2 text-nowrap"
-                                    title="Inspect golden visual baselines, pixel diffs, and interactive split slider"
-                                    @onclick="OpenVisualModal">
-                                <i class="bi bi-images"></i>
-                                <span class="d-none d-sm-inline" style="font-size: 0.75rem;">Visual Baselines</span>
-                                @if (_visualSnapshots.Any(s => s.HasDiff))
+                                @if (_showToolsDropdown)
                                 {
-                                    <span class="badge bg-danger rounded-pill px-1" style="font-size: 0.7rem;">@(_visualSnapshots.Count(s => s.HasDiff)) diff</span>
+                                    <div class="position-fixed top-0 start-0 w-100 h-100" style="z-index: 1040;" @onclick="() => _showToolsDropdown = false"></div>
+                                    <div class="dropdown-menu dropdown-menu-end dropdown-menu-dark show shadow-lg border-secondary border-opacity-50 py-1"
+                                         style="position: absolute; right: 0; top: 100%; margin-top: 4px; z-index: 1050; min-width: 250px; font-size: 0.82rem;"
+                                         @onclick:stopPropagation="true">
+                                        <div class="dropdown-header text-uppercase text-secondary fw-bold px-3 py-1" style="font-size: 0.65rem; letter-spacing: 0.5px;">
+                                            Suite Catalogs & Analysis
+                                        </div>
+                                        <button class="dropdown-item d-flex align-items-center justify-content-between px-3 py-1 text-light"
+                                                @onclick="() => { _showToolsDropdown = false; OpenStepCatalogModal(); }">
+                                            <span class="d-flex align-items-center gap-2">
+                                                <i class="bi bi-collection text-info"></i> Step Catalog
+                                            </span>
+                                            <span class="badge bg-info bg-opacity-25 text-info rounded-pill">@StepCatalog.Steps.Count</span>
+                                        </button>
+                                        <button class="dropdown-item d-flex align-items-center justify-content-between px-3 py-1 text-light"
+                                                @onclick="async () => { _showToolsDropdown = false; await OpenVisualModal(); }">
+                                            <span class="d-flex align-items-center gap-2">
+                                                <i class="bi bi-images text-danger"></i> Visual Baselines
+                                            </span>
+                                            @if (_visualSnapshots.Any(s => s.HasDiff))
+                                            {
+                                                <span class="badge bg-danger rounded-pill">@(_visualSnapshots.Count(s => s.HasDiff)) diff</span>
+                                            }
+                                            else
+                                            {
+                                                <span class="badge bg-secondary bg-opacity-50 text-light rounded-pill">@(_visualSnapshots.Count)</span>
+                                            }
+                                        </button>
+                                        <button class="dropdown-item d-flex align-items-center justify-content-between px-3 py-1 text-light"
+                                                @onclick="() => { _showToolsDropdown = false; OpenLocatorHealthModal(); }">
+                                            <span class="d-flex align-items-center gap-2">
+                                                <i class="bi @GetLocatorHealthIconClass()"></i> Locator Health
+                                            </span>
+                                            <span class="badge @GetLocatorHealthBadgeClass() rounded-pill">@(_locatorReport?.OverallScore ?? 100)% (@(_locatorReport?.HealthGrade ?? "A+"))</span>
+                                        </button>
+                                        <button class="dropdown-item d-flex align-items-center justify-content-between px-3 py-1 text-light"
+                                                @onclick="async () => { _showToolsDropdown = false; await OpenPageObjectCatalogModal(); }">
+                                            <span class="d-flex align-items-center gap-2">
+                                                <i class="bi bi-layers text-secondary"></i> Page Objects
+                                            </span>
+                                            <span class="badge bg-secondary bg-opacity-50 text-light rounded-pill">@(_pageObjects.Count)</span>
+                                        </button>
+
+                                        @if (_selectedFilePath.EndsWith(".feature", StringComparison.OrdinalIgnoreCase) || _selectedFilePath.EndsWith("Steps.cs", StringComparison.OrdinalIgnoreCase))
+                                        {
+                                            <div class="dropdown-divider border-secondary border-opacity-25 my-1"></div>
+                                            <div class="dropdown-header text-uppercase text-secondary fw-bold px-3 py-1" style="font-size: 0.65rem; letter-spacing: 0.5px;">
+                                                AI Authoring Actions
+                                            </div>
+                                            @if (_selectedFilePath.EndsWith(".feature", StringComparison.OrdinalIgnoreCase))
+                                            {
+                                                <button class="dropdown-item d-flex align-items-center gap-2 px-3 py-1 text-warning"
+                                                        @onclick="async () => { _showToolsDropdown = false; await OpenScenarioOutlineModal(); }">
+                                                    <i class="bi bi-grid-3x3-gap-fill"></i> Generate Edge Cases
+                                                </button>
+                                            }
+                                            @if (_selectedFilePath.EndsWith("Steps.cs", StringComparison.OrdinalIgnoreCase))
+                                            {
+                                                <button class="dropdown-item d-flex align-items-center gap-2 px-3 py-1 text-primary"
+                                                        @onclick="() => { _showToolsDropdown = false; OpenExtractPageObjectModal(); }">
+                                                    <i class="bi bi-box-arrow-up-right"></i> Extract Page Object
+                                                </button>
+                                            }
+                                        }
+                                    </div>
                                 }
-                                else
-                                {
-                                    <span class="badge bg-secondary bg-opacity-50 text-light rounded-pill px-1" style="font-size: 0.7rem;">@(_visualSnapshots.Count)</span>
-                                }
-                            </button>
+                            </div>
 
                             <!-- Full Screen Toggle Button -->
                             <button class="btn btn-sm btn-outline-secondary d-flex align-items-center gap-1 py-0 px-2"
@@ -471,6 +459,93 @@
 
                     <!-- View Switcher & Actions -->
                     <div class="d-flex align-items-center gap-2">
+                        <!-- Playwright Run Settings Dropdown -->
+                        <div class="dropdown position-relative">
+                            <button class="btn btn-xs btn-outline-secondary border-opacity-50 dropdown-toggle d-flex align-items-center gap-1 text-light py-1 px-2 shadow-sm"
+                                    title="Playwright Execution Mode, Scope, and Parallel Settings"
+                                    @onclick="() => _showRunSettingsDropdown = !_showRunSettingsDropdown"
+                                    @onclick:stopPropagation="true">
+                                <i class="bi bi-gear-fill text-secondary"></i>
+                                <span style="font-size: 0.73rem;">Settings</span>
+                                <span class="text-secondary" style="font-size: 0.68rem;">(@GetRunSettingsSummary())</span>
+                            </button>
+                            @if (_showRunSettingsDropdown)
+                            {
+                                <div class="position-fixed top-0 start-0 w-100 h-100" style="z-index: 1040;" @onclick="() => _showRunSettingsDropdown = false"></div>
+                                <div class="dropdown-menu dropdown-menu-end dropdown-menu-dark show shadow-lg border-secondary border-opacity-50 p-3"
+                                     style="position: absolute; right: 0; top: 100%; margin-top: 4px; z-index: 1050; min-width: 300px;"
+                                     @onclick:stopPropagation="true">
+                                    <div class="d-flex align-items-center justify-content-between mb-2 pb-1 border-bottom border-secondary border-opacity-25">
+                                        <span class="fw-bold small text-light d-flex align-items-center gap-1">
+                                            <i class="bi bi-sliders2 text-info"></i> Playwright Run Settings
+                                        </span>
+                                        <button class="btn btn-sm btn-link text-secondary text-decoration-none p-0"
+                                                @onclick="() => _showRunSettingsDropdown = false">
+                                            <i class="bi bi-x-lg"></i>
+                                        </button>
+                                    </div>
+
+                                    <!-- Visual Execution Mode -->
+                                    <div class="mb-3">
+                                        <label class="form-label text-secondary fw-semibold mb-1" style="font-size: 0.75rem;">Browser Visual Mode</label>
+                                        <div class="input-group input-group-sm">
+                                            <span class="input-group-text bg-dark text-secondary border-secondary border-opacity-50 px-2">
+                                                <i class="bi bi-eye"></i>
+                                            </span>
+                                            <select class="form-select bg-dark text-light border-secondary border-opacity-50 py-1" @bind="_selectedVisualMode">
+                                                <option value="@VisualExecutionMode.HeadedSlowMo">Visible Browser (Slow 1s)</option>
+                                                <option value="@VisualExecutionMode.HeadedNormal">Visible Browser (Full Speed)</option>
+                                                <option value="@VisualExecutionMode.Headless">Headless (Background)</option>
+                                                <option value="@VisualExecutionMode.Inspector">Playwright Inspector</option>
+                                            </select>
+                                        </div>
+                                    </div>
+
+                                    <!-- Target Scope -->
+                                    <div class="mb-3">
+                                        <label class="form-label text-secondary fw-semibold mb-1" style="font-size: 0.75rem;">Target Scope</label>
+                                        <div class="input-group input-group-sm">
+                                            <span class="input-group-text bg-dark text-secondary border-secondary border-opacity-50 px-2">
+                                                <i class="bi bi-bullseye"></i>
+                                            </span>
+                                            <select class="form-select bg-dark text-light border-secondary border-opacity-50 py-1" @bind="_targetScope">
+                                                <option value="all">All Features in Suite</option>
+                                                <option value="selected">Selected File Only (@(string.IsNullOrEmpty(_selectedFilePath) ? "None selected" : Path.GetFileName(_selectedFilePath)))</option>
+                                            </select>
+                                        </div>
+                                    </div>
+
+                                    <!-- Concurrency Toggle -->
+                                    <div class="p-2 rounded bg-dark border border-secondary border-opacity-25 d-flex align-items-center justify-content-between">
+                                        <div>
+                                            <div class="text-light fw-semibold" style="font-size: 0.75rem;">Concurrency</div>
+                                            <div class="text-secondary" style="font-size: 0.68rem;">@(_runInParallel ? "Concurrent test collections" : "Single browser sequential")</div>
+                                        </div>
+                                        <div class="form-check form-switch m-0">
+                                            <input class="form-check-input" type="checkbox" role="switch" id="runnerParallelSwitch" @bind="_runInParallel" />
+                                        </div>
+                                    </div>
+                                </div>
+                            }
+                        </div>
+
+                        <!-- Run / Stop Tests Button in Runner Header -->
+                        @if (_isTestRunning)
+                        {
+                            <button class="btn btn-xs btn-danger d-flex align-items-center gap-1 shadow-sm px-2 text-nowrap" @onclick="CancelTestRun">
+                                <span class="spinner-border spinner-border-sm" role="status" style="width: 0.65rem; height: 0.65rem;"></span>
+                                Stop
+                            </button>
+                        }
+                        else
+                        {
+                            <button class="btn btn-xs btn-success d-flex align-items-center gap-1 shadow-sm px-2 text-nowrap"
+                                    @onclick="RunSpecFlowTests"
+                                    disabled="@(_isAgentBusy)">
+                                <i class="bi bi-play-fill"></i> Run
+                            </button>
+                        }
+
                         @if (HasTestFailures)
                         {
                             <button class="btn btn-xs btn-danger d-flex align-items-center gap-1 shadow-sm px-2 text-nowrap"
@@ -2231,8 +2306,24 @@
     private bool _showDeleteConfirm;
     private bool _isEditorFullScreen;
     private bool _isChatCollapsed;
+    private bool _showToolsDropdown;
+    private bool _showRunSettingsDropdown;
     private int _lastTestExitCode;
     private DotNetObjectReference<Studio>? _dotNetRef;
+
+    private string GetRunSettingsSummary()
+    {
+        var mode = _selectedVisualMode switch
+        {
+            VisualExecutionMode.HeadedSlowMo => "Slow-Mo",
+            VisualExecutionMode.HeadedNormal => "Headed",
+            VisualExecutionMode.Inspector => "Inspector",
+            _ => "Headless"
+        };
+        var scope = _targetScope == "selected" ? "File" : "All";
+        var concurrency = _runInParallel ? "Parallel" : "Seq";
+        return $"{mode} • {scope} • {concurrency}";
+    }
 
     private bool HasTestFailures =>
         _testScenarios.Any(s => !s.Passed) ||

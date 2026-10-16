@@ -53,6 +53,25 @@ public class VisualSnapshotService : IVisualSnapshotService
         var baselinesDir = GetBaselinesDirectory();
         var visualArtifactsDir = Path.Combine(testsRoot, "TestArtifacts", "visual");
 
+        // Auto-sync any baselines created in bin/ output directory to the source VisualBaselines/ directory
+        var binBaselines = Path.Combine(testsRoot, "bin", "Debug", "net8.0", "VisualBaselines");
+        if (Directory.Exists(binBaselines))
+        {
+            foreach (var binFile in Directory.GetFiles(binBaselines, "*.png"))
+            {
+                var targetFile = Path.Combine(baselinesDir, Path.GetFileName(binFile));
+                if (!File.Exists(targetFile))
+                {
+                    try
+                    {
+                        File.Copy(binFile, targetFile, overwrite: true);
+                        _logger.LogInformation("Auto-synced baseline {FileName} from bin output directory to source VisualBaselines", Path.GetFileName(binFile));
+                    }
+                    catch { }
+                }
+            }
+        }
+
         // 1. Scan existing Golden Baselines
         if (Directory.Exists(baselinesDir))
         {

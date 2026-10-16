@@ -84,6 +84,12 @@ public class TestRunnerService : ITestRunnerService
             }
             startInfo.EnvironmentVariables["TEST_ARTIFACTS_DIR"] = artifactsDir;
             startInfo.EnvironmentVariables["VISUAL_TOLERANCE_PERCENT"] = _config.VisualTolerancePercent.ToString(System.Globalization.CultureInfo.InvariantCulture);
+            var baselinesDir = Path.Combine(testsProjectDir, "VisualBaselines");
+            if (!Directory.Exists(baselinesDir))
+            {
+                Directory.CreateDirectory(baselinesDir);
+            }
+            startInfo.EnvironmentVariables["VISUAL_BASELINES_DIR"] = baselinesDir;
 
             string envArgs;
             switch (options.Mode)

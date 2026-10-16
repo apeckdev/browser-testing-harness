@@ -5,6 +5,7 @@ using System.Diagnostics;
 using System.IO;
 using System.Linq;
 using System.Text;
+using System.Text.RegularExpressions;
 using System.Threading;
 using System.Threading.Tasks;
 using Microsoft.Extensions.AI;
@@ -119,13 +120,14 @@ CORE OPERATIONAL RULES:
          Then ...
    - Saving a feature file automatically triggers dotnet build to compile and generate SpecFlow code-behind.
 
-6. C# STEP DEFINITION AUTHORING:
+6. C# STEP DEFINITION AUTHORING (TEST FRAMEWORK IS XUNIT - NEVER NUNIT):
    - Call the local tool 'SaveStepDefinitionFile' with a matching C# filename (e.g. 'TodoSteps.cs', 'CartSteps.cs').
    - Use 'TechTalk.SpecFlow' and 'Microsoft.Playwright'.
    - Decorate class with [Binding].
    - Constructor-inject 'IPage page'.
    - Use 'await Assertions.Expect(locator)...' for clean assertions.
    - Use async Task for all step methods.
+   - CRITICAL - NO NUNIT: The project uses 'xunit' and 'SpecFlow.xUnit'. DO NOT use NUnit! DO NOT import 'using NUnit.Framework;', DO NOT use 'Assert.That()', '[Test]', or any NUnit syntax! Use 'Microsoft.Playwright.Assertions.Expect(...)' or 'Xunit.Assert'. Any use of NUnit will fail compilation because NUnit is NOT installed.
    - IMPORTANT: DO NOT invent non-existent types or exceptions like 'ScenarioContext.ScenarioContextInjectionException'. Always use standard .NET exceptions such as 'System.ArgumentException' or 'System.NotSupportedException' if a switch case is unhandled.
 
 7. FINAL SUMMARY:
@@ -139,9 +141,12 @@ CORE OPERATIONAL RULES:
    - SpecFlow's BoDi DI container will automatically instantiate and inject the Page Object.
 " : "")}
 9. VISUAL REGRESSION & GOLDEN BASELINE TESTING:
-   - When asked to visually verify an entire page or UI component layout, reuse the built-in visual assertion steps:
+   - When asked to visually verify an entire page or UI component layout, ALWAYS reuse the built-in visual assertion steps:
      * Then the page appearance should match baseline ""<snapshotName>""
+     * Then the page appearance should match baseline ""<snapshotName>"" with tolerance <tolerance>%
      * Then the ""<selector>"" element appearance should match baseline ""<snapshotName>""
+     * Then the ""<selector>"" element appearance should match baseline ""<snapshotName>"" with tolerance <tolerance>%
+   - CRITICAL: DO NOT CREATE ANY C# STEP DEFINITIONS FOR VISUAL REGRESSION TESTING! VisualSteps.cs is already built-in to the test harness. You only need to write the SpecFlow .feature file and reuse these steps.
    - The harness automatically checks against golden references in VisualBaselines/ and highlights pixel diffs in the Studio.
 
 {stepCatalogSummary}";
@@ -580,6 +585,33 @@ CORE OPERATIONAL RULES:
         }
 
         var safeName = Path.GetFileName(fileName);
+
+        // Prevent LLM NUnit hallucination by sanitizing any accidental NUnit imports, attributes, and assertions
+        if (csharpCode.Contains("NUnit", StringComparison.OrdinalIgnoreCase) || csharpCode.Contains("Assert.That", StringComparison.OrdinalIgnoreCase))
+        {
+            csharpCode = Regex.Replace(csharpCode, @"using\s+NUnit\.Framework\s*;", "using Xunit;\nusing Microsoft.Playwright;");
+            csharpCode = Regex.Replace(csharpCode, @"using\s+NUnit\s*;", "// NUnit removed - harness uses xUnit");
+            csharpCode = Regex.Replace(csharpCode, @"\[TestFixture\]\s*", "");
+            csharpCode = Regex.Replace(csharpCode, @"\[Test\]\s*", "");
+
+            // Convert common NUnit Assert.That patterns to xUnit Assert
+            csharpCode = Regex.Replace(csharpCode, @"Assert\.That\s*\(\s*(.+?)\s*,\s*Is\.True\s*\);", "Assert.True($1);");
+            csharpCode = Regex.Replace(csharpCode, @"Assert\.That\s*\(\s*(.+?)\s*,\s*Is\.False\s*\);", "Assert.False($1);");
+            csharpCode = Regex.Replace(csharpCode, @"Assert\.That\s*\(\s*(.+?)\s*,\s*Is\.EqualTo\s*\((.+?)\)\s*\);", "Assert.Equal($2, $1);");
+            csharpCode = Regex.Replace(csharpCode, @"Assert\.That\s*\(\s*(.+?)\s*,\s*Is\.Not\.Null\s*\);", "Assert.NotNull($1);");
+            csharpCode = Regex.Replace(csharpCode, @"Assert\.That\s*\(\s*(.+?)\s*,\s*Is\.Null\s*\);", "Assert.Null($1);");
+            csharpCode = Regex.Replace(csharpCode, @"Assert\.That\s*\(\s*(.+?)\s*,\s*Does\.Contain\s*\((.+?)\)\s*\);", "Assert.Contains($2, $1);");
+            csharpCode = Regex.Replace(csharpCode, @"Assert\.That\s*\(\s*(.+?)\s*\);", "Assert.True($1);");
+
+            _logger.LogInformation("Sanitized accidental NUnit reference from generated step definition {FileName}", safeName);
+        }
+
+        // Prevent duplicating built-in visual assertion steps
+        if (csharpCode.Contains("appearance should match baseline", StringComparison.OrdinalIgnoreCase) && !safeName.Equals("VisualSteps.cs", StringComparison.OrdinalIgnoreCase))
+        {
+            return $"Skipped saving {safeName}: Visual regression steps are already built-in to the test harness in VisualSteps.cs. Please only author the .feature file referencing 'Then the page appearance should match baseline \"<name>\"'.";
+        }
+
         var root = GetTestsProjectRoot();
         var stepsDir = Path.Combine(root, "StepDefinitions");
         if (!Directory.Exists(stepsDir))

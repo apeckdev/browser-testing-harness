@@ -46,12 +46,12 @@ public class PlaywrightHooks
         {
             Headless = !isHeaded,
             SlowMo = slowMo,
-            Args = isHeaded ? new[] { "--start-maximized", "--no-sandbox" } : null
+            Args = new[] { "--no-sandbox", "--hide-scrollbars" }
         });
 
         _context = await _browser.NewContextAsync(new BrowserNewContextOptions
         {
-            ViewportSize = isHeaded ? ViewportSize.NoViewport : new ViewportSize { Width = 1280, Height = 720 }
+            ViewportSize = new ViewportSize { Width = 1280, Height = 800 }
         });
 
         await _context.Tracing.StartAsync(new TracingStartOptions
