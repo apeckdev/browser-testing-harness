@@ -250,11 +250,12 @@
 
         <!-- Right Pane: Code Editor & Live Test Runner Console -->
         <div class="d-flex flex-column flex-grow-1" style="flex: 1 1 0px; min-height: 0; height: 100%; overflow: hidden; background-color: #131418;">
-            <!-- Top Half: File Viewer & Tweaker (flex: 1 1 0px; min-height: 0; overflow: hidden;) -->
+            <!-- Top Half: File Viewer & Tweaker (flex: 1 1 0px; min-height: 0;) -->
             <div class="d-flex flex-column @(_isEditorFullScreen ? "editor-fullscreen-card" : "border-bottom border-secondary border-opacity-25")"
-                 style="@(_isEditorFullScreen ? "" : "flex: 1 1 0px; min-height: 0; overflow: hidden;")">
+                 style="@(_isEditorFullScreen ? "" : "flex: 1 1 0px; min-height: 0; position: relative; z-index: 20;")">
                 <!-- Code Editor Toolbar -->
-                <div class="d-flex align-items-center justify-content-between px-3 py-1 border-bottom border-secondary border-opacity-25 flex-shrink-0 gap-2" style="height: 38px; min-height: 38px; background-color: #1a1c22; flex-wrap: nowrap; overflow-x: auto; overflow-y: hidden;">
+                <div class="d-flex align-items-center justify-content-between px-3 py-1 border-bottom border-secondary border-opacity-25 flex-shrink-0 gap-2"
+                     style="height: 38px; min-height: 38px; background-color: #1a1c22; flex-wrap: nowrap; position: relative; z-index: 1050; overflow: visible;">
                     <div class="d-flex align-items-center gap-2 flex-shrink-0">
                         <i class="bi bi-file-earmark-code text-warning"></i>
                         <span class="fw-semibold small text-light text-nowrap">Workspace Files</span>
@@ -336,9 +337,9 @@
                                 </button>
                                 @if (_showToolsDropdown)
                                 {
-                                    <div class="position-fixed top-0 start-0 w-100 h-100" style="z-index: 1040;" @onclick="() => _showToolsDropdown = false"></div>
+                                    <div class="position-fixed top-0 start-0 w-100 h-100" style="z-index: 1055;" @onclick="() => _showToolsDropdown = false"></div>
                                     <div class="dropdown-menu dropdown-menu-end dropdown-menu-dark show shadow-lg border-secondary border-opacity-50 py-1"
-                                         style="position: absolute; right: 0; top: 100%; margin-top: 4px; z-index: 1050; min-width: 250px; font-size: 0.82rem;"
+                                         style="position: absolute; right: 0; top: 100%; margin-top: 4px; z-index: 1060; min-width: 250px; font-size: 0.82rem;"
                                          @onclick:stopPropagation="true">
                                         <div class="dropdown-header text-uppercase text-secondary fw-bold px-3 py-1" style="font-size: 0.65rem; letter-spacing: 0.5px;">
                                             Suite Catalogs & Analysis
@@ -426,10 +427,11 @@
                 </div>
             </div>
 
-            <!-- Bottom Half: Test Runner Console Output & Detailed Results (flex: 1.2 1 0px; min-height: 0; overflow: hidden;) -->
-            <div class="d-flex flex-column" style="flex: 1.2 1 0px; min-height: 0; overflow: hidden; background-color: #0d0f12;">
+            <!-- Bottom Half: Test Runner Console Output & Detailed Results (flex: 1.2 1 0px; min-height: 0;) -->
+            <div class="d-flex flex-column" style="flex: 1.2 1 0px; min-height: 0; position: relative; z-index: 10; background-color: #0d0f12;">
                 <!-- Console Toolbar -->
-                <div class="d-flex align-items-center justify-content-between px-3 py-1 border-bottom border-secondary border-opacity-25 flex-shrink-0" style="height: 38px; min-height: 38px; background-color: #14171d;">
+                <div class="d-flex align-items-center justify-content-between px-3 py-1 border-bottom border-secondary border-opacity-25 flex-shrink-0"
+                     style="height: 38px; min-height: 38px; background-color: #14171d; position: relative; z-index: 1050; overflow: visible;">
                     <div class="d-flex align-items-center gap-2">
                         <i class="bi bi-terminal-fill text-success" style="font-size: 0.85rem;"></i>
                         <span class="fw-semibold small text-light" style="font-size: 0.82rem;">Test Runner & Results</span>
@@ -471,9 +473,9 @@
                             </button>
                             @if (_showRunSettingsDropdown)
                             {
-                                <div class="position-fixed top-0 start-0 w-100 h-100" style="z-index: 1040;" @onclick="() => _showRunSettingsDropdown = false"></div>
+                                <div class="position-fixed top-0 start-0 w-100 h-100" style="z-index: 1055;" @onclick="() => _showRunSettingsDropdown = false"></div>
                                 <div class="dropdown-menu dropdown-menu-end dropdown-menu-dark show shadow-lg border-secondary border-opacity-50 p-3"
-                                     style="position: absolute; right: 0; top: 100%; margin-top: 4px; z-index: 1050; min-width: 300px;"
+                                     style="position: absolute; right: 0; top: 100%; margin-top: 4px; z-index: 1060; min-width: 300px;"
                                      @onclick:stopPropagation="true">
                                     <div class="d-flex align-items-center justify-content-between mb-2 pb-1 border-bottom border-secondary border-opacity-25">
                                         <span class="fw-bold small text-light d-flex align-items-center gap-1">
