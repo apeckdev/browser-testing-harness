@@ -84,7 +84,18 @@ public class ScenarioOutlineService : IScenarioOutlineService
             }
             else if (current != null)
             {
-                currentText.AppendLine(line);
+                if (IsTagLineForUpcomingScenario(lines, i))
+                {
+                    current.EndLine = i;
+                    current.RawText = currentText.ToString().TrimEnd();
+                    results.Add(current);
+                    current = null;
+                    currentText.Clear();
+                }
+                else
+                {
+                    currentText.AppendLine(line);
+                }
             }
         }
 
@@ -96,6 +107,26 @@ public class ScenarioOutlineService : IScenarioOutlineService
         }
 
         return results;
+    }
+
+    private static bool IsTagLineForUpcomingScenario(string[] lines, int currentIndex)
+    {
+        var trimmed = lines[currentIndex].Trim();
+        if (!trimmed.StartsWith("@")) return false;
+
+        for (int k = currentIndex + 1; k < lines.Length; k++)
+        {
+            var nextTrim = lines[k].Trim();
+            if (string.IsNullOrWhiteSpace(nextTrim)) continue;
+            if (nextTrim.StartsWith("@")) continue;
+            if (nextTrim.StartsWith("Scenario:", StringComparison.OrdinalIgnoreCase) ||
+                nextTrim.StartsWith("Scenario Outline:", StringComparison.OrdinalIgnoreCase))
+            {
+                return true;
+            }
+            return false;
+        }
+        return false;
     }
 
     public async Task<GenerateOutlineResponse> GenerateOutlineAsync(
@@ -178,21 +209,56 @@ Convert the following single Gherkin scenario into a comprehensive parameterized
 
     public string ReplaceScenarioInGherkin(string fullContent, DetectedScenario targetScenario, string replacementOutline)
     {
+        var newline = fullContent.Contains("\r\n") ? "\r\n" : "\n";
         var lines = fullContent.Split(new[] { "\r\n", "\r", "\n" }, StringSplitOptions.None).ToList();
         var startIndex = targetScenario.StartLine - 1;
-        var count = targetScenario.EndLine - targetScenario.StartLine + 1;
+
+        // Verify or locate startIndex if lines shifted or if title matches elsewhere
+        if (startIndex < 0 || startIndex >= lines.Count || !lines[startIndex].Contains(targetScenario.Title, StringComparison.OrdinalIgnoreCase))
+        {
+            var foundIndex = lines.FindIndex(l =>
+                (l.TrimStart().StartsWith("Scenario:", StringComparison.OrdinalIgnoreCase) ||
+                 l.TrimStart().StartsWith("Scenario Outline:", StringComparison.OrdinalIgnoreCase)) &&
+                l.Contains(targetScenario.Title, StringComparison.OrdinalIgnoreCase));
+
+            if (foundIndex >= 0)
+            {
+                startIndex = foundIndex;
+            }
+        }
 
         if (startIndex < 0 || startIndex >= lines.Count)
         {
             // Fallback: append
-            return fullContent.TrimEnd() + "\n\n" + replacementOutline.Trim() + "\n";
+            return fullContent.TrimEnd() + newline + newline + replacementOutline.Trim() + newline;
         }
 
+        // Determine where this scenario ends (next scenario, tag line for upcoming scenario, rule, or EOF)
+        int endIndex = lines.Count;
+        for (int i = startIndex + 1; i < lines.Count; i++)
+        {
+            var trimmed = lines[i].Trim();
+            if (trimmed.StartsWith("Scenario:", StringComparison.OrdinalIgnoreCase) ||
+                trimmed.StartsWith("Scenario Outline:", StringComparison.OrdinalIgnoreCase) ||
+                trimmed.StartsWith("Rule:", StringComparison.OrdinalIgnoreCase) ||
+                IsTagLineForUpcomingScenario(lines.ToArray(), i))
+            {
+                endIndex = i;
+                break;
+            }
+        }
+
+        var count = endIndex - startIndex;
         var replacementLines = replacementOutline.Split(new[] { "\r\n", "\r", "\n" }, StringSplitOptions.None);
-        lines.RemoveRange(startIndex, Math.Min(count, lines.Count - startIndex));
+        lines.RemoveRange(startIndex, count);
         lines.InsertRange(startIndex, replacementLines);
 
-        return string.Join("\n", lines);
+        var result = string.Join(newline, lines);
+        if (!result.EndsWith("\n") && !result.EndsWith("\r"))
+        {
+            result += newline;
+        }
+        return result;
     }
 
     private static string BuildCategoriesPrompt(EdgeCaseCategoryOptions cats)

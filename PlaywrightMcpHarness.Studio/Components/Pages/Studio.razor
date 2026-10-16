@@ -1159,10 +1159,20 @@
             ? _detectedScenarios[_selectedScenarioIndex]
             : null;
 
-    private void OpenScenarioOutlineModal()
+    private async Task OpenScenarioOutlineModal()
     {
         _outlineErrorMessage = null;
         _generatedOutlineResult = "";
+        try
+        {
+            var latest = await JS.InvokeAsync<string>("studioCodeEditor.getValue");
+            if (!string.IsNullOrEmpty(latest))
+            {
+                _currentFileContent = latest;
+            }
+        }
+        catch { }
+
         _detectedScenarios = ScenarioOutlineService.ExtractScenariosFromGherkin(_currentFileContent);
         _selectedScenarioIndex = 0;
         _showOutlineModal = true;
@@ -1226,21 +1236,24 @@
     {
         if (CurrentSelectedScenario == null || string.IsNullOrWhiteSpace(_generatedOutlineResult)) return;
 
-        var updated = ScenarioOutlineService.ReplaceScenarioInGherkin(_currentFileContent, CurrentSelectedScenario, _generatedOutlineResult);
-        _currentFileContent = updated;
-        await SaveCurrentFileEdits();
+        var targetScenario = CurrentSelectedScenario;
+        var updated = ScenarioOutlineService.ReplaceScenarioInGherkin(_currentFileContent, targetScenario, _generatedOutlineResult);
+        await SaveFileContentAsync(updated);
         _showOutlineModal = false;
-        _statusText = $"Replaced scenario '{CurrentSelectedScenario.Title}' with parameterized Scenario Outline.";
+        _statusText = $"Replaced scenario '{targetScenario.Title}' with parameterized Scenario Outline.";
+        await InvokeAsync(StateHasChanged);
     }
 
     private async Task ApplyGeneratedOutlineAppend()
     {
         if (string.IsNullOrWhiteSpace(_generatedOutlineResult)) return;
 
-        _currentFileContent = _currentFileContent.TrimEnd() + "\n\n" + _generatedOutlineResult.Trim() + "\n";
-        await SaveCurrentFileEdits();
+        var newline = _currentFileContent.Contains("\r\n") ? "\r\n" : "\n";
+        var updated = _currentFileContent.TrimEnd() + newline + newline + _generatedOutlineResult.Trim() + newline;
+        await SaveFileContentAsync(updated);
         _showOutlineModal = false;
         _statusText = $"Appended new Scenario Outline to {Path.GetFileName(_selectedFilePath)}.";
+        await InvokeAsync(StateHasChanged);
     }
 
     private async Task CopyGeneratedOutline()
@@ -1664,25 +1677,38 @@
 
     private async Task SaveCurrentFileEdits()
     {
+        await SaveFileContentAsync(null);
+    }
+
+    private async Task SaveFileContentAsync(string? explicitContent)
+    {
         if (string.IsNullOrEmpty(_selectedFilePath))
         {
             return;
         }
 
-        try
+        if (explicitContent != null)
         {
-            var latest = await JS.InvokeAsync<string>("studioCodeEditor.getValue");
-            if (latest != null)
-            {
-                _currentFileContent = latest;
-            }
+            _currentFileContent = explicitContent;
+            await SyncEditorToCurrentFileAsync();
         }
-        catch { }
+        else
+        {
+            try
+            {
+                var latest = await JS.InvokeAsync<string>("studioCodeEditor.getValue");
+                if (latest != null)
+                {
+                    _currentFileContent = latest;
+                }
+            }
+            catch { }
+        }
 
-        _statusText = $"Saving {_selectedFilePath}...";
+        _statusText = $"Saving {Path.GetFileName(_selectedFilePath)}...";
         var res = await AgentService.SaveFileDirectAsync(_selectedFilePath, _currentFileContent);
         _statusText = res;
-        await RefreshTestFiles();
+        await RefreshTestFiles(_selectedFilePath);
     }
 
     private async Task RunSpecFlowTests()
