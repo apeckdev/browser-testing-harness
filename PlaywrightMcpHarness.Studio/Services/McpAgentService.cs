@@ -138,6 +138,12 @@ CORE OPERATIONAL RULES:
    - Step definitions in 'StepDefinitions/' should inject the Page Object (e.g. 'public ContactSteps(ContactPage contactPage)') and delegate actions to it.
    - SpecFlow's BoDi DI container will automatically instantiate and inject the Page Object.
 " : "")}
+9. VISUAL REGRESSION & GOLDEN BASELINE TESTING:
+   - When asked to visually verify an entire page or UI component layout, reuse the built-in visual assertion steps:
+     * Then the page appearance should match baseline ""<snapshotName>""
+     * Then the ""<selector>"" element appearance should match baseline ""<snapshotName>""
+   - The harness automatically checks against golden references in VisualBaselines/ and highlights pixel diffs in the Studio.
+
 {stepCatalogSummary}";
 
         _conversationHistory.Add(new ChatMessage(ChatRole.System, systemPrompt));

@@ -83,6 +83,7 @@ public class TestRunnerService : ITestRunnerService
                 Directory.CreateDirectory(artifactsDir);
             }
             startInfo.EnvironmentVariables["TEST_ARTIFACTS_DIR"] = artifactsDir;
+            startInfo.EnvironmentVariables["VISUAL_TOLERANCE_PERCENT"] = _config.VisualTolerancePercent.ToString(System.Globalization.CultureInfo.InvariantCulture);
 
             string envArgs;
             switch (options.Mode)

@@ -79,6 +79,22 @@ The harness decouples **AI Agent Exploration & Authoring** from **Automated Test
   - **1-Click AI Extract Page Object**: Select any step definition in the Studio editor and click **Extract Page Object** to automatically refactor locators into a new Page Object with clean delegations, tabbed before/after diff preview, and automated build verification.
   - **Page Objects Catalog & Inspector**: Interactive modal to browse all registered Page Objects, inspect method signatures and parameters, view encapsulated locators, and jump directly to code in the editor.
   - **Configurable POM Mode**: Toggle Page Object Model generation in the Settings modal to guide the AI authoring agent to produce modular Page Objects for new tests.
+- **Visual Regression & Golden Image Snapshot Testing**:
+  - **Pure C# Image Engine**: Dependency-free PNG decoder/encoder and visual comparer (`SimplePng` + `VisualComparer`) built natively with standard .NET 8 libraries and `ZLibStream`. Zero third-party imaging dependencies or native library baggage.
+  - **SpecFlow Visual Assertions**:
+    - `Then the page appearance should match baseline "<name>"`
+    - `Then the page appearance should match baseline "<name>" with tolerance <tolerance>%`
+    - `Then the "<selector>" element appearance should match baseline "<name>"`
+    - `Then the "<selector>" element appearance should match baseline "<name>" with tolerance <tolerance>%`
+  - **Automatic Golden Baselines**: The initial test execution automatically establishes the golden baseline in `PlaywrightMcpHarness.Tests/VisualBaselines/`.
+  - **3-Way Visual Artifacts**: On regression, captures Baseline, Actual Render, and Magenta Highlighted Pixel Diff (`#FF0064`) into `TestArtifacts/visual/`.
+  - **Interactive Visual Diff Inspector Modal**:
+    - **Curtain Split Slider**: Drag slider or handle left/right to scrub and reveal subtle pixel shifts and layout shifts in real time.
+    - **3-Way Split View**: Side-by-side inspection of Golden Baseline, Actual Screenshot, and Highlighted Pixel Diff.
+    - **Diff Only View**: Focused high-resolution view of changed pixels.
+    - **1-Click "Accept as New Baseline"**: Promote actual screenshots to golden references directly from the UI with zero manual file copying.
+    - **Fix with Agent**: Send visual regression findings straight to the AI Agent for automated layout diagnosis.
+  - **Configurable Visual Tolerance**: Global tolerance setting (`DefaultVisualTolerancePercent = 0.2%`) configurable in the Settings modal and child test runs.
 - **Visual Execution Modes**:
   - **Headless**: Maximum CI/CD speed.
   - **Visible Browser (Slow-Mo)**: Headed browser execution with 500ms delay per action for visual verification.
@@ -111,9 +127,11 @@ browser-testing-harness/
 │   ├── wwwroot/                         # CodeMirror editor, Bootstrap, styles
 │   └── appsettings.json                 # LLM provider configurations & MCP settings
 ├── PlaywrightMcpHarness.Tests/          # Executable SpecFlow + Playwright test suite
+│   ├── Common/                          # Pure C# PNG encoder & visual regression comparer
 │   ├── Features/                        # Dynamic SpecFlow .feature files (.gitignored)
 │   ├── StepDefinitions/                 # Playwright C# step definitions (.gitignored)
 │   ├── Pages/                           # Enterprise Page Objects (.gitignored)
+│   ├── VisualBaselines/                 # Golden reference baseline images (*.png)
 │   ├── Hooks/                           # SpecFlow before/after scenario hooks (BoDi DI)
 │   ├── specflow.json                    # SpecFlow runtime configuration
 │   └── sequential.runsettings           # Runsettings for sequential execution

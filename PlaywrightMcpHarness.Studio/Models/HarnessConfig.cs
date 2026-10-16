@@ -11,6 +11,7 @@ public class HarnessConfig
     public string ActiveProvider { get; set; } = "LocalOllama";
     public int LlmTimeoutMinutes { get; set; } = 10;
     public bool UsePageObjectModel { get; set; } = false;
+    public double VisualTolerancePercent { get; set; } = 0.2;
     public Dictionary<string, LlmProviderConfig> Providers { get; set; } = new(StringComparer.OrdinalIgnoreCase);
     public PlaywrightMcpConfig PlaywrightMcp { get; set; } = new();
 }

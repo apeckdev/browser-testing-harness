@@ -17,6 +17,7 @@ builder.Services.AddSingleton<IStepCatalogService, StepCatalogService>();
 builder.Services.AddSingleton<IScenarioOutlineService, ScenarioOutlineService>();
 builder.Services.AddSingleton<ILocatorHealthService, LocatorHealthService>();
 builder.Services.AddSingleton<IPageObjectService, PageObjectService>();
+builder.Services.AddSingleton<IVisualSnapshotService, VisualSnapshotService>();
 builder.Services.AddScoped<IMcpAgentService, McpAgentService>();
 builder.Services.AddSingleton<ITestRunnerService, TestRunnerService>();
 
@@ -35,7 +36,7 @@ if (!app.Environment.IsDevelopment())
 }
 app.UseStaticFiles();
 
-// Serve test execution artifacts (screenshots, traces) from TestArtifacts directory
+// Serve test execution artifacts (screenshots, traces, visual diffs) from TestArtifacts directory
 var testRunner = app.Services.GetRequiredService<ITestRunnerService>();
 var artifactsPath = testRunner.GetTestArtifactsPath();
 if (!Directory.Exists(artifactsPath))
@@ -46,11 +47,21 @@ var tracesDir = Path.Combine(artifactsPath, "traces");
 if (!Directory.Exists(tracesDir)) Directory.CreateDirectory(tracesDir);
 var screenshotsDir = Path.Combine(artifactsPath, "screenshots");
 if (!Directory.Exists(screenshotsDir)) Directory.CreateDirectory(screenshotsDir);
+var visualDir = Path.Combine(artifactsPath, "visual");
+if (!Directory.Exists(visualDir)) Directory.CreateDirectory(visualDir);
 
 app.UseStaticFiles(new StaticFileOptions
 {
     FileProvider = new Microsoft.Extensions.FileProviders.PhysicalFileProvider(artifactsPath),
     RequestPath = "/test-artifacts"
+});
+
+var visualSnapshotService = app.Services.GetRequiredService<IVisualSnapshotService>();
+var baselinesDir = visualSnapshotService.GetBaselinesDirectory();
+app.UseStaticFiles(new StaticFileOptions
+{
+    FileProvider = new Microsoft.Extensions.FileProviders.PhysicalFileProvider(baselinesDir),
+    RequestPath = "/test-artifacts/visual-baselines"
 });
 
 app.UseAntiforgery();

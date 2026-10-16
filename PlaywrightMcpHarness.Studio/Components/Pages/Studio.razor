@@ -8,6 +8,7 @@
 @inject IScenarioOutlineService ScenarioOutlineService
 @inject ILocatorHealthService LocatorHealthService
 @inject IPageObjectService PageObjectService
+@inject IVisualSnapshotService VisualSnapshotService
 @inject IOptions<HarnessConfig> ConfigOptions
 @inject IJSRuntime JS
 
@@ -399,6 +400,22 @@
                                 <span class="badge bg-secondary bg-opacity-50 text-light rounded-pill px-1" style="font-size: 0.7rem;">@(_pageObjects.Count)</span>
                             </button>
 
+                            <!-- Visual Baselines & Regression Inspector Button -->
+                            <button class="btn btn-sm btn-outline-danger d-flex align-items-center gap-1 py-0 px-2 text-nowrap"
+                                    title="Inspect golden visual baselines, pixel diffs, and interactive split slider"
+                                    @onclick="OpenVisualModal">
+                                <i class="bi bi-images"></i>
+                                <span class="d-none d-sm-inline" style="font-size: 0.75rem;">Visual Baselines</span>
+                                @if (_visualSnapshots.Any(s => s.HasDiff))
+                                {
+                                    <span class="badge bg-danger rounded-pill px-1" style="font-size: 0.7rem;">@(_visualSnapshots.Count(s => s.HasDiff)) diff</span>
+                                }
+                                else
+                                {
+                                    <span class="badge bg-secondary bg-opacity-50 text-light rounded-pill px-1" style="font-size: 0.7rem;">@(_visualSnapshots.Count)</span>
+                                }
+                            </button>
+
                             <!-- Full Screen Toggle Button -->
                             <button class="btn btn-sm btn-outline-secondary d-flex align-items-center gap-1 py-0 px-2"
                                     title="@(_isEditorFullScreen ? "Exit Full Screen (Esc)" : "Expand Editor to Full Screen")"
@@ -553,6 +570,18 @@
                                                             <i class="bi bi-image"></i> Screenshot
                                                         </button>
                                                     }
+                                                    @if (!string.IsNullOrEmpty(sc.VisualDiffSnapshotName))
+                                                    {
+                                                        <button class="btn btn-xs btn-outline-danger d-flex align-items-center gap-1 py-0 px-2"
+                                                                title="View Visual Diff & Golden Baseline Comparison"
+                                                                @onclick="() => OpenVisualDiffForScenario(sc.VisualDiffSnapshotName)">
+                                                            <i class="bi bi-images"></i> Visual Diff
+                                                            @if (sc.VisualDiffMismatchPercentage.HasValue && sc.VisualDiffMismatchPercentage.Value > 0)
+                                                            {
+                                                                <span class="badge bg-danger text-light px-1" style="font-size: 0.65rem;">@(sc.VisualDiffMismatchPercentage.Value.ToString("F1"))%</span>
+                                                            }
+                                                        </button>
+                                                    }
                                                     <button class="btn btn-xs btn-outline-danger d-flex align-items-center gap-1 py-0 px-2"
                                                             title="Send this scenario failure to AI Agent to diagnose and fix"
                                                             @onclick="() => SendScenarioFailureToAgent(sc)"
@@ -569,6 +598,22 @@
                                                 </span>
                                             </div>
                                         </div>
+
+                                        @if (!sc.Passed && !string.IsNullOrEmpty(sc.VisualDiffSnapshotName))
+                                        {
+                                            <div class="d-flex align-items-center gap-3 pt-1 border-top border-danger border-opacity-25">
+                                                <img src="/test-artifacts/visual/@(sc.VisualDiffSnapshotName).diff.png"
+                                                     alt="Visual Regression Diff Preview"
+                                                     class="rounded border border-danger border-opacity-50 shadow-sm"
+                                                     style="height: 48px; width: 85px; object-fit: cover; cursor: pointer; background: #222;"
+                                                     title="Click to inspect visual diff & compare against golden baseline"
+                                                     @onclick="() => OpenVisualDiffForScenario(sc.VisualDiffSnapshotName)" />
+                                                <div class="small text-secondary">
+                                                    <span class="text-danger fw-semibold"><i class="bi bi-images me-1"></i>Visual Regression Detected@(sc.VisualDiffMismatchPercentage.HasValue ? $" ({sc.VisualDiffMismatchPercentage.Value:F1}% pixel diff)" : ""):</span>
+                                                    Click thumbnail to inspect curtain split slider or accept as new golden baseline.
+                                                </div>
+                                            </div>
+                                        }
 
                                         @if (!sc.Passed && !string.IsNullOrEmpty(sc.ScreenshotFileName))
                                         {
@@ -695,6 +740,24 @@
                         </div>
                         <div class="form-text text-secondary mt-1" style="font-size: 0.75rem;">
                             When enabled, the AI Agent organizes generated tests into Page Objects in <code>PlaywrightMcpHarness.Tests/Pages/</code> and injects them into SpecFlow step definitions via BoDi DI.
+                        </div>
+                    </div>
+                    <div class="border-top border-secondary border-opacity-25 pt-2">
+                        <div class="d-flex align-items-center justify-content-between mb-1">
+                            <label class="form-label small fw-semibold text-secondary mb-0">
+                                <i class="bi bi-images me-1 text-danger"></i>Visual Regression Tolerance (%)
+                            </label>
+                            <span class="badge bg-dark border border-secondary text-info" style="font-size: 0.75rem;">
+                                @_config.VisualTolerancePercent%
+                            </span>
+                        </div>
+                        <div class="input-group input-group-sm">
+                            <input type="number" step="0.05" min="0" max="100" class="form-control bg-dark text-light border-secondary border-opacity-50"
+                                   @bind="_config.VisualTolerancePercent" />
+                            <span class="input-group-text bg-dark text-secondary border-secondary border-opacity-50">%</span>
+                        </div>
+                        <div class="form-text text-secondary mt-1" style="font-size: 0.75rem;">
+                            Maximum percentage of pixel difference permitted before a visual snapshot test is marked as failed (default: 0.2%).
                         </div>
                     </div>
                     <div class="alert alert-secondary bg-dark border-secondary border-opacity-50 text-secondary mb-0 p-2" style="font-size: 0.8rem;">
@@ -1738,6 +1801,388 @@
     </div>
 }
 
+<!-- Modal: Visual Regression & Golden Image Inspector -->
+@if (_showVisualModal)
+{
+    <div class="modal fade show d-block" tabindex="-1" style="background-color: rgba(0,0,0,0.85); z-index: 1055;" @onclick="CloseVisualModal">
+        <div class="modal-dialog modal-fullscreen-lg-down modal-xl modal-dialog-centered" style="max-width: 95vw; height: 90vh;" @onclick:stopPropagation="true">
+            <div class="modal-content bg-dark text-light border border-secondary shadow-lg d-flex flex-column h-100">
+                <!-- Modal Header -->
+                <div class="modal-header border-secondary border-opacity-50 py-2 d-flex align-items-center justify-content-between flex-shrink-0">
+                    <div class="d-flex align-items-center gap-2">
+                        <i class="bi bi-images text-danger fs-5"></i>
+                        <h5 class="modal-title mb-0 fw-bold">Visual Regression & Golden Image Inspector</h5>
+                        <span class="badge bg-secondary bg-opacity-50 ms-2" style="font-size: 0.75rem;">@_visualSnapshots.Count snapshots</span>
+                        @if (_visualSnapshots.Any(s => s.HasDiff))
+                        {
+                            <span class="badge bg-danger ms-1" style="font-size: 0.75rem;">@(_visualSnapshots.Count(s => s.HasDiff)) regressions detected</span>
+                        }
+                    </div>
+                    <div class="d-flex align-items-center gap-3">
+                        <span class="text-secondary small d-none d-md-inline">Tolerance: <strong class="text-info">@_config.VisualTolerancePercent%</strong></span>
+                        <button type="button" class="btn-close btn-close-white" @onclick="CloseVisualModal"></button>
+                    </div>
+                </div>
+
+                <!-- Modal Body: Split view (List on left, Visual Inspector on right) -->
+                <div class="modal-body p-0 d-flex flex-grow-1 overflow-hidden" style="min-height: 0;">
+                    <!-- Left Column: Snapshot List & Filters -->
+                    <div class="d-flex flex-column border-end border-secondary border-opacity-25" style="width: 320px; min-width: 320px; background-color: #121316;">
+                        <div class="p-2 border-bottom border-secondary border-opacity-25 d-flex flex-column gap-2 flex-shrink-0">
+                            <div class="input-group input-group-sm">
+                                <span class="input-group-text bg-dark border-secondary border-opacity-50 text-secondary">
+                                    <i class="bi bi-search"></i>
+                                </span>
+                                <input type="text" class="form-control bg-dark text-light border-secondary border-opacity-50"
+                                       placeholder="Search snapshots..."
+                                       @bind="_visualSearchQuery" @bind:event="oninput" />
+                            </div>
+                            <div class="d-flex align-items-center gap-1">
+                                <select class="form-select form-select-sm bg-dark text-light border-secondary border-opacity-50"
+                                        @bind="_visualStatusFilter">
+                                    <option value="All">All Snapshots (@_visualSnapshots.Count)</option>
+                                    <option value="Diffs">Diffs Detected (@_visualSnapshots.Count(s => s.HasDiff))</option>
+                                    <option value="Baselines">Golden Baselines (@_visualSnapshots.Count(s => s.HasBaseline && !s.HasDiff))</option>
+                                </select>
+                                <button class="btn btn-sm btn-outline-secondary py-1 px-2"
+                                        title="Refresh snapshots"
+                                        @onclick="RefreshVisualSnapshotsAsync">
+                                    <i class="bi bi-arrow-clockwise"></i>
+                                </button>
+                            </div>
+                        </div>
+
+                        <div class="flex-grow-1 overflow-auto p-1">
+                            @if (!FilteredVisualSnapshots.Any())
+                            {
+                                <div class="text-secondary small text-center p-4">
+                                    No visual snapshots match the current filter.
+                                </div>
+                            }
+                            else
+                            {
+                                <div class="list-group list-group-flush">
+                                    @foreach (var snap in FilteredVisualSnapshots)
+                                    {
+                                        var isSelected = _selectedVisualSnapshot?.SnapshotName == snap.SnapshotName;
+                                        <button type="button"
+                                                class="list-group-item list-group-item-action text-light py-2 px-2 border-0 rounded mb-1 d-flex flex-column gap-1 @(isSelected ? "bg-primary bg-opacity-25 border border-primary border-opacity-50" : "bg-dark bg-opacity-50")"
+                                                style="cursor: pointer;"
+                                                @onclick="() => SelectVisualSnapshot(snap)">
+                                            <div class="d-flex align-items-center justify-content-between">
+                                                <span class="fw-semibold text-truncate small" style="max-width: 190px;" title="@snap.SnapshotName">
+                                                    @snap.SnapshotName
+                                                </span>
+                                                @if (snap.HasDiff)
+                                                {
+                                                    <span class="badge bg-danger rounded-pill" style="font-size: 0.65rem;">Diff</span>
+                                                }
+                                                else if (snap.HasBaseline)
+                                                {
+                                                    <span class="badge bg-success bg-opacity-25 text-success rounded-pill" style="font-size: 0.65rem;">Clean</span>
+                                                }
+                                                else
+                                                {
+                                                    <span class="badge bg-warning text-dark rounded-pill" style="font-size: 0.65rem;">New</span>
+                                                }
+                                            </div>
+                                            <div class="d-flex align-items-center justify-content-between text-secondary" style="font-size: 0.7rem;">
+                                                <span>@(snap.HasBaseline ? "Golden baseline" : "Captured only")</span>
+                                                <span>@snap.LastModified.ToString("MMM d, HH:mm")</span>
+                                            </div>
+                                        </button>
+                                    }
+                                </div>
+                            }
+                        </div>
+                    </div>
+
+                    <!-- Right Column: Inspector Workspace -->
+                    <div class="d-flex flex-column flex-grow-1 overflow-hidden" style="min-width: 0;">
+                        @if (_selectedVisualSnapshot == null)
+                        {
+                            <div class="d-flex flex-column align-items-center justify-content-center h-100 text-secondary p-5">
+                                <i class="bi bi-images fs-1 text-secondary opacity-50 mb-3"></i>
+                                <h5>No Snapshot Selected</h5>
+                                <p class="small text-secondary">Select a visual snapshot from the sidebar to inspect golden baselines, pixel differences, and split sliders.</p>
+                            </div>
+                        }
+                        else
+                        {
+                            <!-- Toolbar for Selected Snapshot -->
+                            <div class="d-flex align-items-center justify-content-between p-2 border-bottom border-secondary border-opacity-25 bg-dark flex-shrink-0 flex-wrap gap-2">
+                                <div class="d-flex align-items-center gap-2">
+                                    <h6 class="mb-0 fw-bold text-light d-flex align-items-center gap-2">
+                                        <i class="bi bi-file-earmark-image text-danger"></i>
+                                        @_selectedVisualSnapshot.SnapshotName
+                                    </h6>
+                                    @if (_selectedVisualSnapshot.HasDiff)
+                                    {
+                                        <span class="badge bg-danger">Diff Detected</span>
+                                    }
+                                    else if (_selectedVisualSnapshot.HasBaseline)
+                                    {
+                                        <span class="badge bg-success bg-opacity-25 text-success border border-success border-opacity-25">Baseline Clean</span>
+                                    }
+                                    else
+                                    {
+                                        <span class="badge bg-warning text-dark">New Baseline</span>
+                                    }
+                                </div>
+
+                                <div class="d-flex align-items-center gap-2 flex-wrap">
+                                    <!-- View Mode Switcher -->
+                                    <div class="btn-group btn-group-sm" role="group">
+                                        <button type="button" class="btn @(_visualViewMode == "curtain" ? "btn-primary" : "btn-outline-secondary")"
+                                                @onclick='() => _visualViewMode = "curtain"' title="Interactive Curtain Split Slider">
+                                            <i class="bi bi-layout-split me-1"></i>Curtain Slider
+                                        </button>
+                                        <button type="button" class="btn @(_visualViewMode == "sideBySide" ? "btn-primary" : "btn-outline-secondary")"
+                                                @onclick='() => _visualViewMode = "sideBySide"' title="Side-by-side 3-way comparison">
+                                            <i class="bi bi-columns me-1"></i>3-Way Split
+                                        </button>
+                                        <button type="button" class="btn @(_visualViewMode == "diffOnly" ? "btn-primary" : "btn-outline-secondary")"
+                                                @onclick='() => _visualViewMode = "diffOnly"' title="Diff highlight only">
+                                            <i class="bi bi-magic me-1"></i>Diff Only
+                                        </button>
+                                    </div>
+
+                                    @if (_selectedVisualSnapshot.HasActual)
+                                    {
+                                        <button class="btn btn-sm btn-success d-flex align-items-center gap-1 shadow-sm"
+                                                title="Promote the actual screenshot to replace the current golden baseline"
+                                                @onclick="() => AcceptBaseline(_selectedVisualSnapshot)">
+                                            <i class="bi bi-check2-circle"></i> Accept as New Baseline
+                                        </button>
+                                    }
+
+                                    @if (_selectedVisualSnapshot.HasBaseline)
+                                    {
+                                        <button class="btn btn-sm btn-outline-danger d-flex align-items-center gap-1"
+                                                title="Delete this golden baseline reference"
+                                                @onclick="() => DeleteBaseline(_selectedVisualSnapshot)">
+                                            <i class="bi bi-trash"></i> Delete Baseline
+                                        </button>
+                                    }
+
+                                    @if (_selectedVisualSnapshot.HasDiff)
+                                    {
+                                        <button class="btn btn-sm btn-outline-info d-flex align-items-center gap-1"
+                                                title="Send diff diagnostics to AI agent"
+                                                @onclick="() => SendVisualDiffToAgent(_selectedVisualSnapshot)">
+                                            <i class="bi bi-robot"></i> Fix with Agent
+                                        </button>
+                                    }
+                                </div>
+                            </div>
+
+                            <!-- Inspection Canvas -->
+                            <div class="flex-grow-1 p-2 overflow-auto" style="min-height: 0;">
+                                @if (_visualViewMode == "curtain")
+                                {
+                                    <div class="d-flex flex-column gap-2 h-100">
+                                        <div class="d-flex align-items-center justify-content-between px-3 py-1 bg-dark bg-opacity-75 rounded border border-secondary border-opacity-25 flex-shrink-0">
+                                            <div class="d-flex align-items-center gap-2">
+                                                <span class="badge bg-success bg-opacity-25 text-success border border-success border-opacity-25">◀ Baseline (Left: @_curtainSliderPos%)</span>
+                                                <span class="badge bg-primary bg-opacity-25 text-primary border border-primary border-opacity-25">Actual (Right: @(100 - _curtainSliderPos)%) ▶</span>
+                                            </div>
+                                            <div class="d-flex align-items-center gap-2 flex-grow-1 mx-4" style="max-width: 450px;">
+                                                <span class="small text-secondary">0%</span>
+                                                <input type="range" class="form-range" min="0" max="100" @bind="_curtainSliderPos" @bind:event="oninput" id="curtainRangeSlider" />
+                                                <span class="small text-secondary">100%</span>
+                                            </div>
+                                            <div class="d-flex align-items-center gap-1">
+                                                <button class="btn btn-xs btn-outline-secondary" @onclick="() => _curtainSliderPos = 100">All Baseline</button>
+                                                <button class="btn btn-xs btn-outline-secondary" @onclick="() => _curtainSliderPos = 50">50/50 Split</button>
+                                                <button class="btn btn-xs btn-outline-secondary" @onclick="() => _curtainSliderPos = 0">All Actual</button>
+                                            </div>
+                                        </div>
+
+                                        <div class="position-relative flex-grow-1 overflow-auto d-flex justify-content-center align-items-center p-3 rounded border border-secondary border-opacity-25"
+                                             style="background: repeating-conic-gradient(#1a1d20 0% 25%, #141619 0% 50%) 50% / 20px 20px; min-height: 480px;">
+                                            @if (!string.IsNullOrEmpty(_selectedVisualSnapshot.BaselineUrl) && !string.IsNullOrEmpty(_selectedVisualSnapshot.ActualUrl))
+                                            {
+                                                <div class="position-relative shadow-lg border border-secondary border-opacity-50 rounded" style="max-width: 100%; max-height: 70vh; display: inline-block;">
+                                                    <!-- Baseline Image (Bottom Layer) -->
+                                                    <img src="@_selectedVisualSnapshot.BaselineUrl" alt="Baseline"
+                                                         class="d-block user-select-none" style="max-width: 100%; max-height: 70vh; object-fit: contain;" />
+
+                                                    <!-- Actual Image (Top Layer, Clipped to curtain position) -->
+                                                    <img src="@_selectedVisualSnapshot.ActualUrl" alt="Actual"
+                                                         class="d-block position-absolute top-0 start-0 user-select-none"
+                                                         style="width: 100%; height: 100%; object-fit: contain; clip-path: polygon(@_curtainSliderPos% 0, 100% 0, 100% 100%, @_curtainSliderPos% 100%);" />
+
+                                                    <!-- Vertical Split Divider Handle -->
+                                                    <div class="position-absolute top-0 bottom-0 pointer-events-none"
+                                                         style="left: @_curtainSliderPos%; width: 2px; background-color: #38bdf8; box-shadow: 0 0 8px #38bdf8; z-index: 5;">
+                                                        <div class="position-absolute rounded-circle shadow-lg d-flex align-items-center justify-content-center text-dark"
+                                                             style="top: 50%; left: -14px; width: 28px; height: 28px; background: #38bdf8; transform: translateY(-50%); font-size: 14px;">
+                                                            <i class="bi bi-arrow-left-right"></i>
+                                                        </div>
+                                                    </div>
+                                                </div>
+                                            }
+                                            else if (!string.IsNullOrEmpty(_selectedVisualSnapshot.ActualUrl))
+                                            {
+                                                <div class="text-center p-4">
+                                                    <div class="alert alert-warning d-inline-block text-start mb-3">
+                                                        <i class="bi bi-exclamation-triangle-fill me-2"></i>
+                                                        <strong>No baseline exists yet for this snapshot.</strong>
+                                                        <div>Click <strong>Accept as New Baseline</strong> above to establish this screenshot as the golden reference.</div>
+                                                    </div>
+                                                    <div>
+                                                        <img src="@_selectedVisualSnapshot.ActualUrl" alt="Actual"
+                                                             class="rounded border border-warning shadow-lg" style="max-width: 80%; max-height: 60vh;" />
+                                                    </div>
+                                                </div>
+                                            }
+                                            else if (!string.IsNullOrEmpty(_selectedVisualSnapshot.BaselineUrl))
+                                            {
+                                                <div class="text-center p-4">
+                                                    <div class="text-secondary small mb-2"><i class="bi bi-check-circle text-success me-1"></i>Golden Baseline Reference (No actual test diff currently captured)</div>
+                                                    <img src="@_selectedVisualSnapshot.BaselineUrl" alt="Baseline"
+                                                         class="rounded border border-secondary shadow-lg" style="max-width: 80%; max-height: 60vh;" />
+                                                </div>
+                                            }
+                                        </div>
+                                    </div>
+                                }
+                                else if (_visualViewMode == "sideBySide")
+                                {
+                                    <div class="row g-3 h-100 overflow-auto p-2">
+                                        <!-- Golden Baseline -->
+                                        <div class="col-md-4 d-flex flex-column">
+                                            <div class="card bg-dark border-secondary border-opacity-50 h-100 shadow-sm d-flex flex-column">
+                                                <div class="card-header bg-dark border-secondary border-opacity-25 d-flex align-items-center justify-content-between py-2">
+                                                    <span class="fw-semibold small text-success d-flex align-items-center gap-1">
+                                                        <i class="bi bi-shield-check"></i> Golden Baseline
+                                                    </span>
+                                                    @if (_selectedVisualSnapshot.HasBaseline)
+                                                    {
+                                                        <span class="badge bg-success bg-opacity-25 text-success" style="font-size: 0.7rem;">Active Reference</span>
+                                                    }
+                                                    else
+                                                    {
+                                                        <span class="badge bg-secondary" style="font-size: 0.7rem;">Missing</span>
+                                                    }
+                                                </div>
+                                                <div class="card-body d-flex align-items-center justify-content-center p-2 flex-grow-1" style="background-color: #121316; min-height: 300px;">
+                                                    @if (!string.IsNullOrEmpty(_selectedVisualSnapshot.BaselineUrl))
+                                                    {
+                                                        <img src="@_selectedVisualSnapshot.BaselineUrl" alt="Baseline" class="img-fluid rounded border border-secondary border-opacity-25 shadow-sm" style="max-height: 55vh; object-fit: contain;" />
+                                                    }
+                                                    else
+                                                    {
+                                                        <div class="text-secondary small text-center p-3">No golden baseline saved yet.</div>
+                                                    }
+                                                </div>
+                                            </div>
+                                        </div>
+
+                                        <!-- Actual Screenshot -->
+                                        <div class="col-md-4 d-flex flex-column">
+                                            <div class="card bg-dark border-secondary border-opacity-50 h-100 shadow-sm d-flex flex-column">
+                                                <div class="card-header bg-dark border-secondary border-opacity-25 d-flex align-items-center justify-content-between py-2">
+                                                    <span class="fw-semibold small text-info d-flex align-items-center gap-1">
+                                                        <i class="bi bi-camera"></i> Actual Test Render
+                                                    </span>
+                                                    @if (_selectedVisualSnapshot.HasActual)
+                                                    {
+                                                        <span class="badge bg-info bg-opacity-25 text-info" style="font-size: 0.7rem;">Captured</span>
+                                                    }
+                                                    else
+                                                    {
+                                                        <span class="badge bg-secondary" style="font-size: 0.7rem;">No Recent Run</span>
+                                                    }
+                                                </div>
+                                                <div class="card-body d-flex align-items-center justify-content-center p-2 flex-grow-1" style="background-color: #121316; min-height: 300px;">
+                                                    @if (!string.IsNullOrEmpty(_selectedVisualSnapshot.ActualUrl))
+                                                    {
+                                                        <img src="@_selectedVisualSnapshot.ActualUrl" alt="Actual" class="img-fluid rounded border border-info border-opacity-25 shadow-sm" style="max-height: 55vh; object-fit: contain;" />
+                                                    }
+                                                    else
+                                                    {
+                                                        <div class="text-secondary small text-center p-3">No actual screenshot captured in the last run.</div>
+                                                    }
+                                                </div>
+                                            </div>
+                                        </div>
+
+                                        <!-- Highlighted Diff -->
+                                        <div class="col-md-4 d-flex flex-column">
+                                            <div class="card bg-dark border-secondary border-opacity-50 h-100 shadow-sm d-flex flex-column">
+                                                <div class="card-header bg-dark border-secondary border-opacity-25 d-flex align-items-center justify-content-between py-2">
+                                                    <span class="fw-semibold small text-danger d-flex align-items-center gap-1">
+                                                        <i class="bi bi-magic"></i> Highlighted Pixel Diff
+                                                    </span>
+                                                    @if (_selectedVisualSnapshot.HasDiff)
+                                                    {
+                                                        <span class="badge bg-danger" style="font-size: 0.7rem;">Diff Detected</span>
+                                                    }
+                                                    else
+                                                    {
+                                                        <span class="badge bg-success bg-opacity-25 text-success" style="font-size: 0.7rem;">Identical / Clean</span>
+                                                    }
+                                                </div>
+                                                <div class="card-body d-flex align-items-center justify-content-center p-2 flex-grow-1" style="background-color: #121316; min-height: 300px;">
+                                                    @if (!string.IsNullOrEmpty(_selectedVisualSnapshot.DiffUrl))
+                                                    {
+                                                        <img src="@_selectedVisualSnapshot.DiffUrl" alt="Diff" class="img-fluid rounded border border-danger border-opacity-50 shadow-sm" style="max-height: 55vh; object-fit: contain;" />
+                                                    }
+                                                    else
+                                                    {
+                                                        <div class="text-success small text-center p-3">
+                                                            <i class="bi bi-check-circle-fill fs-3 d-block mb-2 text-success"></i>
+                                                            No visual difference detected! Actual render matches baseline within tolerance.
+                                                        </div>
+                                                    }
+                                                </div>
+                                            </div>
+                                        </div>
+                                    </div>
+                                }
+                                else if (_visualViewMode == "diffOnly")
+                                {
+                                    <div class="d-flex flex-column align-items-center justify-content-center p-3 h-100 overflow-auto" style="background-color: #121316;">
+                                        @if (!string.IsNullOrEmpty(_selectedVisualSnapshot.DiffUrl))
+                                        {
+                                            <div class="text-center mb-2">
+                                                <span class="badge bg-danger px-3 py-1">
+                                                    <i class="bi bi-magic me-1"></i>Magenta Pixels (#FF0064) represent altered or shifted UI elements
+                                                </span>
+                                            </div>
+                                            <img src="@_selectedVisualSnapshot.DiffUrl" alt="Diff"
+                                                 class="rounded border border-danger border-opacity-50 shadow-lg"
+                                                 style="max-width: 95%; max-height: 65vh; object-fit: contain;" />
+                                        }
+                                        else
+                                        {
+                                            <div class="text-center text-success p-5">
+                                                <i class="bi bi-check-circle-fill fs-1 text-success mb-3 d-block"></i>
+                                                <h5>No Visual Diff Detected</h5>
+                                                <p class="text-secondary small">This golden baseline matches the actual screenshot perfectly or no test diff is present.</p>
+                                            </div>
+                                        }
+                                    </div>
+                                }
+                            </div>
+                        }
+                    </div>
+                </div>
+
+                <!-- Modal Footer -->
+                <div class="modal-footer border-secondary border-opacity-50 py-2 d-flex justify-content-between flex-shrink-0">
+                    <div class="small text-secondary">
+                        <i class="bi bi-info-circle me-1"></i>
+                        Golden references stored in <code>PlaywrightMcpHarness.Tests/VisualBaselines/</code>. Ephemeral test diffs stored in <code>TestArtifacts/visual/</code>.
+                    </div>
+                    <button type="button" class="btn btn-sm btn-secondary" @onclick="CloseVisualModal">Close</button>
+                </div>
+            </div>
+        </div>
+    </div>
+}
+
 <style>
     .cursor-blink {
         display: inline-block;
@@ -1798,6 +2243,38 @@
                                     l.Contains("Test Run Failed", StringComparison.OrdinalIgnoreCase));
 
     private ScenarioResult? _previewScenarioScreenshot;
+
+    private bool _showVisualModal;
+    private List<VisualSnapshotItem> _visualSnapshots = new();
+    private VisualSnapshotItem? _selectedVisualSnapshot;
+    private string _visualSearchQuery = "";
+    private string _visualStatusFilter = "All";
+    private string _visualViewMode = "curtain";
+    private int _curtainSliderPos = 50;
+
+    private IEnumerable<VisualSnapshotItem> FilteredVisualSnapshots
+    {
+        get
+        {
+            var list = _visualSnapshots.AsEnumerable();
+            if (_visualStatusFilter == "Diffs")
+            {
+                list = list.Where(s => s.HasDiff);
+            }
+            else if (_visualStatusFilter == "Baselines")
+            {
+                list = list.Where(s => s.HasBaseline && !s.HasDiff);
+            }
+
+            if (!string.IsNullOrWhiteSpace(_visualSearchQuery))
+            {
+                var q = _visualSearchQuery.Trim();
+                list = list.Where(s => s.SnapshotName.Contains(q, StringComparison.OrdinalIgnoreCase));
+            }
+
+            return list;
+        }
+    }
 
     private bool _showStepCatalogModal;
     private string _stepSearchQuery = "";
@@ -2434,6 +2911,8 @@
         public string ErrorMessage { get; set; } = "";
         public string? ScreenshotFileName { get; set; }
         public string? TraceFileName { get; set; }
+        public string? VisualDiffSnapshotName { get; set; }
+        public double? VisualDiffMismatchPercentage { get; set; }
     }
 
     private string StatusBadgeClass => _statusText.Contains("failed", StringComparison.OrdinalIgnoreCase) || _statusText.Contains("error", StringComparison.OrdinalIgnoreCase)
@@ -2697,6 +3176,7 @@
         await StepCatalog.ScanStepDefinitionsAsync(forceReload: true);
         _locatorReport = await LocatorHealthService.AnalyzeTestSuiteLocatorsAsync(forceReload: true);
         _pageObjects = await PageObjectService.GetPageObjectsAsync(forceReload: true);
+        _visualSnapshots = await VisualSnapshotService.GetVisualSnapshotsAsync(forceReload: true);
         try
         {
             await JS.InvokeVoidAsync("studioCodeEditor.setStepCatalog", StepCatalog.Steps);
@@ -2954,6 +3434,7 @@
             var artifactsDir = TestRunner.GetTestArtifactsPath();
             var tracesDir = Path.Combine(artifactsDir, "traces");
             var screenshotsDir = Path.Combine(artifactsDir, "screenshots");
+            var visualDir = Path.Combine(artifactsDir, "visual");
 
             foreach (var sc in _testScenarios)
             {
@@ -2975,7 +3456,18 @@
                 {
                     sc.ScreenshotFileName = null;
                 }
+
+                if (Directory.Exists(visualDir) && (File.Exists(Path.Combine(visualDir, $"{sanitized}.diff.png")) || File.Exists(Path.Combine(visualDir, $"{sanitized}.actual.png"))))
+                {
+                    sc.VisualDiffSnapshotName = sanitized;
+                }
             }
+
+            _ = InvokeAsync(async () =>
+            {
+                _visualSnapshots = await VisualSnapshotService.GetVisualSnapshotsAsync(forceReload: true);
+                StateHasChanged();
+            });
         }
         catch { }
     }
@@ -3154,6 +3646,115 @@
                 lastSc.TraceFileName = fileName;
             }
         }
+        else if (trimmed.StartsWith("[VISUAL_DIFF_FAILED] ", StringComparison.OrdinalIgnoreCase))
+        {
+            var rest = trimmed.Substring(21).Trim();
+            var parts = rest.Split(' ', StringSplitOptions.RemoveEmptyEntries);
+            var snapshotName = parts.Length > 0 ? parts[0] : "";
+            double mismatchPct = 0;
+            var mismatchIdx = rest.IndexOf("Mismatch:", StringComparison.OrdinalIgnoreCase);
+            if (mismatchIdx >= 0)
+            {
+                var pctPart = rest.Substring(mismatchIdx + 9).Trim();
+                var pctEnd = pctPart.IndexOf('%');
+                if (pctEnd > 0)
+                {
+                    double.TryParse(pctPart.Substring(0, pctEnd), out mismatchPct);
+                }
+            }
+            var lastFailed = _testScenarios.LastOrDefault(s => !s.Passed);
+            if (lastFailed != null)
+            {
+                lastFailed.VisualDiffSnapshotName = snapshotName;
+                lastFailed.VisualDiffMismatchPercentage = mismatchPct;
+            }
+        }
+    }
+
+    private async Task OpenVisualModal()
+    {
+        _visualSnapshots = await VisualSnapshotService.GetVisualSnapshotsAsync(forceReload: true);
+        if (_selectedVisualSnapshot == null || !_visualSnapshots.Any(s => s.SnapshotName == _selectedVisualSnapshot.SnapshotName))
+        {
+            _selectedVisualSnapshot = _visualSnapshots.FirstOrDefault(s => s.HasDiff) ?? _visualSnapshots.FirstOrDefault();
+        }
+        _curtainSliderPos = 50;
+        _showVisualModal = true;
+    }
+
+    private void CloseVisualModal()
+    {
+        _showVisualModal = false;
+    }
+
+    private void SelectVisualSnapshot(VisualSnapshotItem item)
+    {
+        _selectedVisualSnapshot = item;
+        _curtainSliderPos = 50;
+    }
+
+    private async Task RefreshVisualSnapshotsAsync()
+    {
+        _visualSnapshots = await VisualSnapshotService.GetVisualSnapshotsAsync(forceReload: true);
+        if (_selectedVisualSnapshot != null)
+        {
+            _selectedVisualSnapshot = _visualSnapshots.FirstOrDefault(s => s.SnapshotName == _selectedVisualSnapshot.SnapshotName) ?? _visualSnapshots.FirstOrDefault();
+        }
+        StateHasChanged();
+    }
+
+    private async Task AcceptBaseline(VisualSnapshotItem item)
+    {
+        var ok = await VisualSnapshotService.AcceptNewBaselineAsync(item.SnapshotName);
+        if (ok)
+        {
+            _statusText = $"Accepted '{item.SnapshotName}' as new golden baseline.";
+            _visualSnapshots = await VisualSnapshotService.GetVisualSnapshotsAsync(forceReload: true);
+            _selectedVisualSnapshot = _visualSnapshots.FirstOrDefault(s => s.SnapshotName == item.SnapshotName);
+        }
+        else
+        {
+            _statusText = $"Failed to accept baseline for '{item.SnapshotName}'.";
+        }
+        StateHasChanged();
+    }
+
+    private async Task DeleteBaseline(VisualSnapshotItem item)
+    {
+        var ok = await VisualSnapshotService.DeleteBaselineAsync(item.SnapshotName);
+        if (ok)
+        {
+            _statusText = $"Deleted golden baseline '{item.SnapshotName}'.";
+            _visualSnapshots = await VisualSnapshotService.GetVisualSnapshotsAsync(forceReload: true);
+            _selectedVisualSnapshot = _visualSnapshots.FirstOrDefault();
+        }
+        StateHasChanged();
+    }
+
+    private async Task SendVisualDiffToAgent(VisualSnapshotItem item)
+    {
+        _showVisualModal = false;
+        _promptInput = $"A visual regression was detected for snapshot '{item.SnapshotName}'. The actual screenshot diverges from the golden baseline. Please analyze the UI, check recent changes, or recommend if the baseline should be updated.";
+        await SendPromptToAgent();
+    }
+
+    private async Task OpenVisualDiffForScenario(string? snapshotName)
+    {
+        if (string.IsNullOrWhiteSpace(snapshotName)) return;
+        _visualSnapshots = await VisualSnapshotService.GetVisualSnapshotsAsync(forceReload: true);
+        _selectedVisualSnapshot = _visualSnapshots.FirstOrDefault(s => string.Equals(s.SnapshotName, snapshotName, StringComparison.OrdinalIgnoreCase))
+            ?? new VisualSnapshotItem
+            {
+                SnapshotName = snapshotName,
+                ActualUrl = $"/test-artifacts/visual/{snapshotName}.actual.png?t={DateTime.UtcNow.Ticks}",
+                DiffUrl = $"/test-artifacts/visual/{snapshotName}.diff.png?t={DateTime.UtcNow.Ticks}",
+                BaselineUrl = $"/test-artifacts/visual-baselines/{snapshotName}.png?t={DateTime.UtcNow.Ticks}",
+                HasDiff = true,
+                HasActual = true
+            };
+        _visualViewMode = "curtain";
+        _curtainSliderPos = 50;
+        _showVisualModal = true;
     }
 
     private void CancelTestRun()
@@ -3175,9 +3776,13 @@
         {
             return "text-success fw-bold";
         }
-        if (trimmed.StartsWith("Failed ", StringComparison.OrdinalIgnoreCase) || trimmed.StartsWith("Failed!", StringComparison.OrdinalIgnoreCase) || trimmed.StartsWith("[ERR]") || trimmed.Contains("Error Message:", StringComparison.OrdinalIgnoreCase))
+        if (trimmed.StartsWith("Failed ", StringComparison.OrdinalIgnoreCase) || trimmed.StartsWith("Failed!", StringComparison.OrdinalIgnoreCase) || trimmed.StartsWith("[ERR]") || trimmed.Contains("Error Message:", StringComparison.OrdinalIgnoreCase) || trimmed.StartsWith("[VISUAL_DIFF_FAILED]"))
         {
             return "text-danger fw-bold";
+        }
+        if (trimmed.StartsWith("[VISUAL_DIFF_PASSED]") || trimmed.StartsWith("[VISUAL_BASELINE_CREATED]"))
+        {
+            return "text-info fw-semibold";
         }
         if (trimmed.StartsWith("Given ", StringComparison.OrdinalIgnoreCase) ||
             trimmed.StartsWith("When ", StringComparison.OrdinalIgnoreCase) ||
