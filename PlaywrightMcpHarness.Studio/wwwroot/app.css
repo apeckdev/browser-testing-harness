@@ -202,3 +202,91 @@ li.CodeMirror-hint-active {
     color: #facc15 !important;
 }
 
+/* Editor Synchronized / Conflict Action Banners */
+.editor-sync-banner {
+    position: relative;
+    border-bottom-width: 1px;
+    border-bottom-style: solid;
+    animation: fadeInBanner 0.2s ease-out;
+}
+
+@keyframes fadeInBanner {
+    from { opacity: 0; transform: translateY(-2px); }
+    to { opacity: 1; transform: translateY(0); }
+}
+
+.editor-sync-banner-info {
+    background: linear-gradient(90deg, rgba(14, 165, 233, 0.16) 0%, rgba(15, 23, 42, 0.85) 100%) !important;
+    border-bottom-color: rgba(56, 189, 248, 0.3) !important;
+    color: #e2e8f0 !important;
+}
+
+.editor-sync-banner-info .banner-icon {
+    color: #38bdf8 !important;
+    font-size: 0.95rem;
+}
+
+.editor-sync-banner-info .banner-title {
+    color: #38bdf8 !important;
+    font-weight: 600;
+}
+
+.editor-sync-banner-info .banner-time {
+    color: #94a3b8 !important;
+}
+
+.editor-sync-banner-info .banner-text {
+    color: #e2e8f0 !important;
+}
+
+.editor-sync-banner-warning {
+    background: linear-gradient(90deg, rgba(245, 158, 11, 0.16) 0%, rgba(28, 25, 23, 0.85) 100%) !important;
+    border-bottom-color: rgba(245, 158, 11, 0.35) !important;
+    color: #fef3c7 !important;
+}
+
+.editor-sync-banner-warning .banner-icon {
+    color: #facc15 !important;
+    font-size: 0.95rem;
+}
+
+.editor-sync-banner-warning .banner-title,
+.editor-sync-banner-warning .banner-highlight {
+    color: #facc15 !important;
+    font-weight: 600;
+}
+
+.editor-sync-banner-warning .banner-time {
+    color: #fbbf24 !important;
+    opacity: 0.85;
+}
+
+.editor-sync-banner-warning .banner-text {
+    color: #fef3c7 !important;
+}
+
+.banner-close-btn {
+    color: #94a3b8 !important;
+    text-decoration: none !important;
+    background: none !important;
+    border: none !important;
+    opacity: 0.75;
+    transition: opacity 0.15s ease, color 0.15s ease;
+}
+
+.banner-close-btn:hover {
+    color: #f8fafc !important;
+    opacity: 1;
+}
+
+/* Opacity utilities for Bootstrap 5.1 */
+.bg-opacity-10 { --bs-bg-opacity: 0.1 !important; }
+.bg-opacity-15 { --bs-bg-opacity: 0.15 !important; }
+.bg-opacity-20 { --bs-bg-opacity: 0.2 !important; }
+.bg-opacity-25 { --bs-bg-opacity: 0.25 !important; }
+.bg-opacity-30 { --bs-bg-opacity: 0.3 !important; }
+.bg-opacity-40 { --bs-bg-opacity: 0.4 !important; }
+.bg-opacity-50 { --bs-bg-opacity: 0.5 !important; }
+.bg-opacity-60 { --bs-bg-opacity: 0.6 !important; }
+.bg-opacity-75 { --bs-bg-opacity: 0.75 !important; }
+

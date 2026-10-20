@@ -687,7 +687,10 @@ CORE OPERATIONAL RULES:
         // Wrap MCP tools with status notifications
         foreach (var mcpTool in mcpTools)
         {
-            allTools.Add(new ObservableAIFunction(mcpTool, name => OnStatusUpdate?.Invoke($"Executing MCP Tool: {name}...")));
+            allTools.Add(new ObservableAIFunction(
+                mcpTool,
+                detail => OnStatusUpdate?.Invoke($"Running MCP Tool: {detail}..."),
+                name => OnStatusUpdate?.Invoke($"Completed MCP Tool: {name}. Awaiting {activeProviderName}...")));
         }
 
         // Add custom local tools
@@ -716,11 +719,26 @@ CORE OPERATIONAL RULES:
             "SavePageObjectFile",
             "Writes/updates a Page Object class in PlaywrightMcpHarness.Tests/Pages/.");
 
-        allTools.Add(new ObservableAIFunction(readTool, name => OnStatusUpdate?.Invoke($"Executing Local Tool: {name}...")));
-        allTools.Add(new ObservableAIFunction(catalogTool, name => OnStatusUpdate?.Invoke($"Executing Local Tool: {name}...")));
-        allTools.Add(new ObservableAIFunction(saveFeatureTool, name => OnStatusUpdate?.Invoke($"Executing Local Tool: {name}...")));
-        allTools.Add(new ObservableAIFunction(saveStepTool, name => OnStatusUpdate?.Invoke($"Executing Local Tool: {name}...")));
-        allTools.Add(new ObservableAIFunction(savePageObjectTool, name => OnStatusUpdate?.Invoke($"Executing Local Tool: {name}...")));
+        allTools.Add(new ObservableAIFunction(
+            readTool,
+            detail => OnStatusUpdate?.Invoke($"Running Local Tool: {detail}..."),
+            name => OnStatusUpdate?.Invoke($"Completed Local Tool: {name}. Awaiting {activeProviderName}...")));
+        allTools.Add(new ObservableAIFunction(
+            catalogTool,
+            detail => OnStatusUpdate?.Invoke($"Running Local Tool: {detail}..."),
+            name => OnStatusUpdate?.Invoke($"Completed Local Tool: {name}. Awaiting {activeProviderName}...")));
+        allTools.Add(new ObservableAIFunction(
+            saveFeatureTool,
+            detail => OnStatusUpdate?.Invoke($"Running Local Tool: {detail}..."),
+            name => OnStatusUpdate?.Invoke($"Completed Local Tool: {name}. Awaiting {activeProviderName}...")));
+        allTools.Add(new ObservableAIFunction(
+            saveStepTool,
+            detail => OnStatusUpdate?.Invoke($"Running Local Tool: {detail}..."),
+            name => OnStatusUpdate?.Invoke($"Completed Local Tool: {name}. Awaiting {activeProviderName}...")));
+        allTools.Add(new ObservableAIFunction(
+            savePageObjectTool,
+            detail => OnStatusUpdate?.Invoke($"Running Local Tool: {detail}..."),
+            name => OnStatusUpdate?.Invoke($"Completed Local Tool: {name}. Awaiting {activeProviderName}...")));
 
         _conversationHistory.Add(new ChatMessage(ChatRole.User, userPrompt));
 
@@ -734,6 +752,7 @@ CORE OPERATIONAL RULES:
         OnStatusUpdate?.Invoke($"Waiting for {activeProviderName} response...");
 
         var fullResponseBuilder = new StringBuilder();
+        var hasStartedStreaming = false;
 
         try
         {
@@ -742,6 +761,11 @@ CORE OPERATIONAL RULES:
                 var text = update.Text;
                 if (!string.IsNullOrEmpty(text))
                 {
+                    if (!hasStartedStreaming)
+                    {
+                        hasStartedStreaming = true;
+                        OnStatusUpdate?.Invoke($"Generating response from {activeProviderName}...");
+                    }
                     fullResponseBuilder.Append(text);
                     OnAgentMessageChunk?.Invoke(text);
                 }
@@ -790,16 +814,58 @@ CORE OPERATIONAL RULES:
 public class ObservableAIFunction : DelegatingAIFunction
 {
     private readonly Action<string> _onExecuting;
+    private readonly Action<string>? _onCompleted;
 
-    public ObservableAIFunction(AIFunction innerFunction, Action<string> onExecuting)
+    public ObservableAIFunction(AIFunction innerFunction, Action<string> onExecuting, Action<string>? onCompleted = null)
         : base(innerFunction)
     {
         _onExecuting = onExecuting;
+        _onCompleted = onCompleted;
     }
 
     protected override async ValueTask<object?> InvokeCoreAsync(AIFunctionArguments arguments, CancellationToken cancellationToken)
     {
-        _onExecuting(Name);
-        return await base.InvokeCoreAsync(arguments, cancellationToken);
+        var detail = FormatDetail(arguments);
+        _onExecuting(detail);
+        try
+        {
+            var result = await base.InvokeCoreAsync(arguments, cancellationToken);
+            _onCompleted?.Invoke(Name);
+            return result;
+        }
+        catch (Exception ex)
+        {
+            _onCompleted?.Invoke($"{Name} (failed: {ex.Message})");
+            throw;
+        }
+    }
+
+    private string FormatDetail(AIFunctionArguments? arguments)
+    {
+        if (arguments == null || arguments.Count == 0)
+        {
+            return Name;
+        }
+
+        if (arguments.TryGetValue("url", out var url) && url != null)
+        {
+            return $"{Name} ({url})";
+        }
+        if (arguments.TryGetValue("fileName", out var fn) && fn != null)
+        {
+            return $"{Name} ({fn})";
+        }
+        if (arguments.TryGetValue("selector", out var sel) && sel != null)
+        {
+            return $"{Name} ({sel})";
+        }
+        if (arguments.TryGetValue("text", out var txt) && txt != null)
+        {
+            var truncated = txt.ToString() ?? "";
+            if (truncated.Length > 28) truncated = truncated.Substring(0, 28) + "...";
+            return $"{Name} (\"{truncated}\")";
+        }
+
+        return Name;
     }
 }

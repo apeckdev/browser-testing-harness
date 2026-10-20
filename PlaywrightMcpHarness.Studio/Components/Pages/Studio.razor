@@ -152,20 +152,38 @@
 
             <!-- Chat Messages History: flex: 1 1 0px; min-height: 0; overflow-y: auto -->
             <div id="chatScrollArea" class="p-3 d-flex flex-column gap-3" style="flex: 1 1 0px; min-height: 0; overflow-y: auto; overflow-x: hidden; font-size: 0.9rem; scroll-behavior: smooth;">
-                @foreach (var msg in AgentService.ConversationHistory.Where(m => m.Role != ChatRole.System))
+                @foreach (var (msg, index) in AgentService.ConversationHistory.Where(m => m.Role != ChatRole.System).Select((m, i) => (m, i)))
                 {
                     <div class="d-flex flex-column @(msg.Role == ChatRole.User ? "align-items-end" : "align-items-start") w-100">
-                        <div class="d-flex align-items-center gap-2 mb-1 px-1">
-                            @if (msg.Role == ChatRole.User)
-                            {
-                                <span class="badge bg-primary bg-opacity-75 text-light" style="font-size: 0.72rem;">User</span>
-                            }
-                            else
-                            {
-                                <span class="badge bg-secondary text-light" style="font-size: 0.72rem;">
-                                    <i class="bi bi-cpu me-1"></i>Agent (@_selectedProviderKey)
-                                </span>
-                            }
+                        <div class="d-flex align-items-center justify-content-between w-100 mb-1 px-1">
+                            <div class="d-flex align-items-center gap-2">
+                                @if (msg.Role == ChatRole.User)
+                                {
+                                    <span class="badge bg-primary bg-opacity-75 text-light" style="font-size: 0.72rem;">User</span>
+                                }
+                                else
+                                {
+                                    <span class="badge bg-secondary text-light" style="font-size: 0.72rem;">
+                                        <i class="bi bi-cpu me-1"></i>Agent (@_selectedProviderKey)
+                                    </span>
+                                }
+                            </div>
+                            <div class="d-flex align-items-center gap-1">
+                                <button class="btn btn-xs @(_copiedMessageIndex == index ? "btn-success text-light" : "btn-outline-secondary border-0 text-secondary") py-0 px-2 d-flex align-items-center gap-1"
+                                        style="font-size: 0.7rem;"
+                                        title="Copy message to clipboard"
+                                        @onclick="() => CopyChatMessageAsync(msg.Text, index)">
+                                    <i class="bi @(_copiedMessageIndex == index ? "bi-check-lg" : "bi-clipboard")"></i>
+                                    <span>@(_copiedMessageIndex == index ? "Copied!" : "Copy")</span>
+                                </button>
+                                <button class="btn btn-xs btn-outline-secondary border-0 text-secondary py-0 px-1 d-flex align-items-center gap-1"
+                                        style="font-size: 0.7rem;"
+                                        title="Paste into prompt box"
+                                        @onclick="() => PasteToPrompt(msg.Text)">
+                                    <i class="bi bi-reply-fill"></i>
+                                    <span>Quote</span>
+                                </button>
+                            </div>
                         </div>
                         <div class="p-3 rounded-3 shadow-sm border border-secondary border-opacity-25"
                              style="max-width: 92%; word-break: break-word; overflow-wrap: anywhere; font-family: 'Inter', sans-serif; @(msg.Role == ChatRole.User ? "background-color: #273043; color: #f1f5f9;" : "background-color: #1e222b; color: #e2e8f0;")">
@@ -174,18 +192,113 @@
                     </div>
                 }
 
-                @if (_isAgentBusy && !string.IsNullOrEmpty(_streamingChunk))
+                @if (_isAgentBusy)
                 {
-                    <div class="d-flex flex-column align-items-start w-100">
-                        <div class="d-flex align-items-center gap-2 mb-1 px-1">
-                            <span class="badge bg-info text-dark" style="font-size: 0.72rem;">
-                                <span class="spinner-border spinner-border-sm me-1" style="width: 0.7rem; height: 0.7rem;"></span>
-                                Agent Generating...
+                    <div class="d-flex flex-column align-items-start w-100 my-1">
+                        <!-- Card Header Badges: Status + Elapsed Stopwatch Timer + Provider -->
+                        <div class="d-flex align-items-center gap-2 mb-1 px-1 flex-wrap">
+                            <span class="badge bg-info bg-opacity-25 text-info border border-info border-opacity-25 d-flex align-items-center gap-1 py-1 px-2" style="font-size: 0.72rem;">
+                                <span class="spinner-grow spinner-grow-sm text-info" role="status" style="width: 0.6rem; height: 0.6rem;"></span>
+                                Thinking & Working
+                            </span>
+                            <span class="badge bg-dark text-warning border border-secondary border-opacity-25 d-flex align-items-center gap-1 py-1 px-2" style="font-size: 0.72rem;" title="Live elapsed duration">
+                                <i class="bi bi-stopwatch"></i>
+                                <span>@FormatElapsed(_agentElapsedSeconds)</span>
+                            </span>
+                            <span class="badge bg-secondary bg-opacity-25 text-secondary border border-secondary border-opacity-25" style="font-size: 0.7rem;">
+                                <i class="bi bi-cpu me-1"></i>@_selectedProviderKey
                             </span>
                         </div>
-                        <div class="p-3 rounded-3 shadow-sm border border-info border-opacity-50"
-                             style="max-width: 92%; word-break: break-word; overflow-wrap: anywhere; font-family: 'Inter', sans-serif; background-color: #1b2432; color: #e0f2fe;">
-                            <div style="white-space: pre-wrap; font-family: inherit;">@_streamingChunk<span class="cursor-blink">|</span></div>
+
+                        <!-- Card Body -->
+                        <div class="p-3 rounded-3 shadow-lg border border-info border-opacity-40 w-100"
+                             style="max-width: 96%; background: linear-gradient(145deg, #182230 0%, #12161f 100%); color: #e2e8f0;">
+
+                            <!-- Current In-Flight Action Banner -->
+                            <div class="d-flex align-items-center justify-content-between pb-2 mb-2 border-bottom border-secondary border-opacity-25 gap-2">
+                                <div class="d-flex align-items-center gap-2 text-info flex-grow-1 overflow-hidden" style="min-width: 0;">
+                                    <span class="spinner-border spinner-border-sm text-info flex-shrink-0" style="width: 0.85rem; height: 0.85rem;"></span>
+                                    <span class="fw-semibold small text-truncate" style="font-size: 0.82rem;" title="@(_agentActivitySteps.LastOrDefault()?.Description ?? "Contacting AI provider...")">
+                                        @(_agentActivitySteps.LastOrDefault()?.Description ?? "Contacting AI provider...")
+                                    </span>
+                                </div>
+                                <button class="btn btn-xs btn-outline-danger d-flex align-items-center gap-1 flex-shrink-0 py-0 px-2"
+                                        style="font-size: 0.72rem;"
+                                        @onclick="CancelAgent"
+                                        title="Cancel in-flight agent execution">
+                                    <i class="bi bi-x-circle"></i> Cancel
+                                </button>
+                            </div>
+
+                            <!-- Animated Glowing Subtle Progress Wave -->
+                            <div class="progress bg-dark bg-opacity-75 mb-2" style="height: 3px;">
+                                <div class="progress-bar progress-bar-striped progress-bar-animated bg-info" role="progressbar" style="width: 100%;"></div>
+                            </div>
+
+                            <!-- Live Action Steps Log -->
+                            @if (_agentActivitySteps.Count > 0)
+                            {
+                                <div class="mb-2 p-2 rounded bg-black bg-opacity-40 border border-secondary border-opacity-25" style="font-size: 0.75rem;">
+                                    <div class="d-flex align-items-center justify-content-between text-secondary fw-semibold mb-1" style="font-size: 0.68rem; letter-spacing: 0.5px;">
+                                        <span>LIVE AGENT ACTIVITY (@_agentActivitySteps.Count steps)</span>
+                                        @if (_agentActivitySteps.Count > 4)
+                                        {
+                                            <a href="javascript:void(0)" class="text-info text-decoration-none" style="font-size: 0.68rem;" @onclick="() => _showAllAgentSteps = !_showAllAgentSteps">
+                                                @(_showAllAgentSteps ? "Show Less" : "Show All")
+                                            </a>
+                                        }
+                                    </div>
+                                    <div class="d-flex flex-column gap-1" style="max-height: @(_showAllAgentSteps ? "220px" : "110px"); overflow-y: auto;">
+                                        @foreach (var step in (_showAllAgentSteps ? _agentActivitySteps : _agentActivitySteps.TakeLast(4)))
+                                        {
+                                            <div class="d-flex align-items-center gap-2 py-0 @(step.IsActive ? "text-info fw-semibold" : step.IsError ? "text-danger" : "text-secondary text-opacity-75")" style="line-height: 1.35;">
+                                                @if (step.IsActive)
+                                                {
+                                                    <i class="bi bi-arrow-right-short text-info flex-shrink-0" style="font-size: 0.9rem;"></i>
+                                                }
+                                                else if (step.IsError)
+                                                {
+                                                    <i class="bi bi-exclamation-circle-fill text-danger flex-shrink-0" style="font-size: 0.72rem;"></i>
+                                                }
+                                                else
+                                                {
+                                                    <i class="bi bi-check2 text-success flex-shrink-0" style="font-size: 0.8rem;"></i>
+                                                }
+                                                <span class="text-truncate flex-grow-1" title="@step.Description">@step.Description</span>
+                                                <span class="text-secondary opacity-50 flex-shrink-0 ms-1" style="font-size: 0.65rem;">@step.Timestamp.ToString("HH:mm:ss")</span>
+                                            </div>
+                                        }
+                                    </div>
+                                </div>
+                            }
+
+                            <!-- Live Streaming Content Stream (when tokens arrive) -->
+                            @if (!string.IsNullOrEmpty(_streamingChunk))
+                            {
+                                <div class="mt-2 pt-2 border-top border-secondary border-opacity-25 d-flex align-items-center justify-content-between mb-1">
+                                    <span class="text-info small fw-semibold" style="font-size: 0.72rem;">
+                                        <i class="bi bi-chat-left-text-fill me-1"></i>Streaming Output:
+                                    </span>
+                                    <button class="btn btn-xs @(_copiedMessageIndex == -1 ? "btn-success text-light" : "btn-outline-info") py-0 px-2 d-flex align-items-center gap-1"
+                                            style="font-size: 0.7rem;"
+                                            title="Copy live streaming response to clipboard"
+                                            @onclick="() => CopyChatMessageAsync(_streamingChunk, -1)">
+                                        <i class="bi @(_copiedMessageIndex == -1 ? "bi-check-lg" : "bi-clipboard")"></i>
+                                        <span>@(_copiedMessageIndex == -1 ? "Copied!" : "Copy Stream")</span>
+                                    </button>
+                                </div>
+                                <div class="p-2 rounded bg-black bg-opacity-30 border border-secondary border-opacity-25"
+                                     style="white-space: pre-wrap; font-family: 'Inter', sans-serif; font-size: 0.88rem; color: #f0fdf4; line-height: 1.5; max-height: 300px; overflow-y: auto;">
+                                    @_streamingChunk<span class="cursor-blink">|</span>
+                                </div>
+                            }
+                            else
+                            {
+                                <div class="d-flex align-items-center gap-2 text-secondary fst-italic small py-1" style="font-size: 0.75rem;">
+                                    <i class="bi bi-hourglass-split text-info"></i>
+                                    <span>Processing prompt, awaiting response stream...</span>
+                                </div>
+                            }
                         </div>
                     </div>
                 }
@@ -260,7 +373,7 @@
                     <div class="d-flex align-items-center gap-2 flex-shrink-0">
                         <i class="bi bi-file-earmark-code text-warning"></i>
                         <span class="fw-semibold small text-light text-nowrap">Workspace Files</span>
-                        <div class="input-group input-group-sm" style="width: 230px;">
+                        <div class="input-group input-group-sm" style="width: 240px;">
                             <select class="form-select bg-dark text-light border-secondary border-opacity-50 py-0"
                                     @bind="_selectedFilePath"
                                     @bind:after="OnFileSelected">
@@ -272,7 +385,7 @@
                                 {
                                     @foreach (var f in _testFiles)
                                     {
-                                        <option value="@f.RelativePath">[@f.FileType] @f.FileName</option>
+                                        <option value="@f.RelativePath">[@f.FileType] @f.FileName@(IsFileDirty(f.RelativePath) ? " *" : "")</option>
                                     }
                                 }
                             </select>
@@ -282,17 +395,56 @@
                                 @onclick="() => RefreshTestFiles()">
                             <i class="bi bi-arrow-repeat"></i> Refresh
                         </button>
+
+                        @if (!string.IsNullOrEmpty(_selectedFilePath))
+                        {
+                            @if (IsCurrentFileDirty)
+                            {
+                                <span class="badge bg-warning bg-opacity-20 text-warning border border-warning border-opacity-50 d-flex align-items-center gap-1 py-1 px-2 text-nowrap shadow-sm"
+                                      style="font-size: 0.72rem;"
+                                      title="Editor has unsaved changes that differ from disk">
+                                    <i class="bi bi-pencil-fill" style="font-size: 0.55rem;"></i>
+                                    Unsaved Changes
+                                </span>
+                            }
+                            else
+                            {
+                                <span class="badge bg-success bg-opacity-10 text-success border border-success border-opacity-25 d-flex align-items-center gap-1 py-1 px-2 text-nowrap"
+                                      style="font-size: 0.72rem;"
+                                      title="Editor is in sync with the file saved to disk">
+                                    <i class="bi bi-hdd-fill" style="font-size: 0.62rem;"></i>
+                                    Saved to Disk
+                                </span>
+                            }
+                        }
                     </div>
 
                     <div class="d-flex align-items-center gap-2 flex-shrink-0">
                         @if (!string.IsNullOrEmpty(_selectedFilePath))
                         {
-                            <button class="btn btn-sm btn-outline-success d-flex align-items-center gap-1 py-0 px-2"
-                                    title="Save changes to this file"
-                                    @onclick="SaveCurrentFileEdits"
-                                    disabled="@(_isAgentBusy || _isTestRunning)">
-                                <i class="bi bi-floppy"></i> Save Edits
-                            </button>
+                            @if (IsCurrentFileDirty)
+                            {
+                                <button class="btn btn-sm btn-warning text-dark fw-bold d-flex align-items-center gap-1 py-0 px-2 shadow-sm text-nowrap"
+                                        title="Save your editor changes to disk"
+                                        @onclick="SaveCurrentFileEdits"
+                                        disabled="@(_isAgentBusy || _isTestRunning)">
+                                    <i class="bi bi-floppy-fill"></i> Save to Disk *
+                                </button>
+                                <button class="btn btn-sm btn-outline-secondary d-flex align-items-center gap-1 py-0 px-2 text-nowrap"
+                                        title="Discard editor changes and reload file from disk"
+                                        @onclick="RevertCurrentFileEdits"
+                                        disabled="@(_isAgentBusy || _isTestRunning)">
+                                    <i class="bi bi-arrow-counterclockwise"></i> Revert
+                                </button>
+                            }
+                            else
+                            {
+                                <button class="btn btn-sm btn-outline-secondary border-opacity-25 text-secondary d-flex align-items-center gap-1 py-0 px-2 text-nowrap"
+                                        title="All changes are saved to disk"
+                                        disabled>
+                                    <i class="bi bi-check2"></i> Saved
+                                </button>
+                            }
 
                             @if (_showDeleteConfirm)
                             {
@@ -424,8 +576,62 @@
                     </div>
                 </div>
 
+                <!-- Disk Sync & Unsaved Changes Action Banners -->
+                @if (_showAgentConflictBanner && !string.IsNullOrEmpty(_selectedFilePath))
+                {
+                    <div class="px-3 py-1 editor-sync-banner editor-sync-banner-warning d-flex align-items-center justify-content-between flex-shrink-0" style="font-size: 0.78rem;">
+                        <div class="d-flex align-items-center gap-2">
+                            <i class="bi bi-exclamation-triangle-fill banner-icon"></i>
+                            <span class="banner-text"><strong class="banner-title">AI Agent updated this file on disk</strong> <span class="banner-time">(@_lastAgentSavedTime?.ToString("HH:mm:ss"))</span>, but you have unsaved editor edits.</span>
+                        </div>
+                        <div class="d-flex align-items-center gap-2">
+                            <button class="btn btn-xs btn-outline-info py-0 px-2" @onclick="ReloadCurrentFileFromDisk">
+                                <i class="bi bi-arrow-clockwise"></i> Load AI Disk Version
+                            </button>
+                            <button class="btn btn-xs btn-warning text-dark fw-bold py-0 px-2" @onclick="SaveCurrentFileEdits">
+                                <i class="bi bi-floppy-fill"></i> Overwrite Disk with My Edits
+                            </button>
+                            <button class="btn btn-xs banner-close-btn p-0 ms-1" @onclick="() => _showAgentConflictBanner = false" title="Dismiss notification">
+                                <i class="bi bi-x-lg"></i>
+                            </button>
+                        </div>
+                    </div>
+                }
+                else if (_showAgentDiskUpdateBanner && !string.IsNullOrEmpty(_selectedFilePath))
+                {
+                    <div class="px-3 py-1 editor-sync-banner editor-sync-banner-info d-flex align-items-center justify-content-between flex-shrink-0" style="font-size: 0.78rem;">
+                        <div class="d-flex align-items-center gap-2">
+                            <i class="bi bi-robot banner-icon"></i>
+                            <span class="banner-text"><strong class="banner-title">AI Agent saved this file to disk</strong> <span class="banner-time">(@_lastAgentSavedTime?.ToString("HH:mm:ss"))</span>. Editor is synchronized with disk.</span>
+                        </div>
+                        <button class="btn btn-xs banner-close-btn p-0" @onclick="() => _showAgentDiskUpdateBanner = false" title="Dismiss notification">
+                            <i class="bi bi-x-lg"></i>
+                        </button>
+                    </div>
+                }
+                else if (_showUnsavedSwitchConfirm && !string.IsNullOrEmpty(_pendingSwitchFilePath))
+                {
+                    <div class="px-3 py-1 editor-sync-banner editor-sync-banner-warning d-flex align-items-center justify-content-between flex-shrink-0" style="font-size: 0.78rem;">
+                        <div class="d-flex align-items-center gap-2">
+                            <i class="bi bi-exclamation-circle-fill banner-icon"></i>
+                            <span class="banner-text">Unsaved changes in <strong class="banner-highlight">@(Path.GetFileName(_selectedFilePath))</strong>. Save to disk before switching?</span>
+                        </div>
+                        <div class="d-flex align-items-center gap-2">
+                            <button class="btn btn-xs btn-warning text-dark fw-bold py-0 px-2" @onclick="ConfirmSaveAndSwitch">
+                                <i class="bi bi-floppy-fill"></i> Save & Switch
+                            </button>
+                            <button class="btn btn-xs btn-outline-danger py-0 px-2" @onclick="ConfirmDiscardAndSwitch">
+                                <i class="bi bi-trash"></i> Discard & Switch
+                            </button>
+                            <button class="btn btn-xs btn-outline-secondary py-0 px-1" @onclick="CancelSwitch">
+                                Cancel
+                            </button>
+                        </div>
+                    </div>
+                }
+
                 <!-- Code Editor Area: flex: 1 1 0px; min-height: 0; overflow: hidden; -->
-                <div class="p-0 bg-dark d-flex" style="flex: 1 1 0px; min-height: 0; height: calc(100% - 38px); overflow: hidden;">
+                <div class="p-0 bg-dark d-flex" style="flex: 1 1 0px; min-height: 0; overflow: hidden;">
                     <textarea id="studioCodeTextarea"
                               class="form-control bg-dark text-light border-0 shadow-none h-100 w-100"
                               style="font-family: 'JetBrains Mono', Consolas, monospace; font-size: 0.88rem; line-height: 1.5; resize: none; tab-size: 4; overflow: auto;"
@@ -439,7 +645,7 @@
             <div class="d-flex flex-column" style="flex: 1.2 1 0px; min-height: 0; position: relative; z-index: 10; background-color: #0d0f12;">
                 <!-- Console Toolbar -->
                 <div class="d-flex align-items-center justify-content-between px-3 py-1 border-bottom border-secondary border-opacity-25 flex-shrink-0 gap-2"
-                     style="height: 38px; min-height: 38px; max-height: 38px; background-color: #14171d; position: relative; z-index: 1050; flex-wrap: nowrap; overflow-x: auto; overflow-y: visible;">
+                     style="height: 38px; min-height: 38px; background-color: #14171d; position: relative; z-index: 1050; flex-wrap: nowrap; overflow: visible;">
                     <div class="d-flex align-items-center gap-2 flex-shrink-0 text-nowrap">
                         <i class="bi bi-terminal-fill text-success" style="font-size: 0.85rem;"></i>
                         <span class="fw-bold small text-light text-nowrap" style="font-size: 0.8rem;">Test Runner</span>
@@ -2502,9 +2708,76 @@
     private CancellationTokenSource? _agentCts;
     private CancellationTokenSource? _testCts;
 
+    public class AgentActivityStep
+    {
+        public string Description { get; set; } = "";
+        public DateTime Timestamp { get; set; } = DateTime.Now;
+        public bool IsActive { get; set; }
+        public bool IsError { get; set; }
+    }
+
+    private readonly List<AgentActivityStep> _agentActivitySteps = new();
+    private System.Timers.Timer? _agentElapsedTimer;
+    private int _agentElapsedSeconds;
+    private bool _showAllAgentSteps;
+
+    private static string FormatElapsed(int totalSeconds)
+    {
+        var mins = totalSeconds / 60;
+        var secs = totalSeconds % 60;
+        return $"{mins:D2}:{secs:D2}";
+    }
+
     private List<TestFileInfo> _testFiles = new();
     private string _selectedFilePath = "";
+    private string _activeFilePath = "";
     private string _currentFileContent = "";
+    private string? _pendingSwitchFilePath;
+    private bool _showUnsavedSwitchConfirm;
+    private bool _showAgentConflictBanner;
+    private bool _showAgentDiskUpdateBanner;
+    private string? _lastAgentSavedFilePath;
+    private DateTime? _lastAgentSavedTime;
+    private int? _copiedMessageIndex;
+
+    private string ActiveFileDiskContent
+    {
+        get
+        {
+            var targetPath = !string.IsNullOrEmpty(_activeFilePath) ? _activeFilePath : _selectedFilePath;
+            if (string.IsNullOrEmpty(targetPath)) return "";
+            var match = _testFiles.FirstOrDefault(f => string.Equals(f.RelativePath, targetPath, StringComparison.OrdinalIgnoreCase));
+            return match?.Content ?? "";
+        }
+    }
+
+    private string SelectedFileDiskContent => ActiveFileDiskContent;
+
+    private bool IsCurrentFileDirty
+    {
+        get
+        {
+            var targetPath = !string.IsNullOrEmpty(_activeFilePath) ? _activeFilePath : _selectedFilePath;
+            if (string.IsNullOrEmpty(targetPath)) return false;
+            return NormalizeLineEndings(_currentFileContent) != NormalizeLineEndings(ActiveFileDiskContent);
+        }
+    }
+
+    private static string NormalizeLineEndings(string? text)
+    {
+        return (text ?? "").Replace("\r\n", "\n").TrimEnd();
+    }
+
+    private bool IsFileDirty(string path)
+    {
+        if (string.IsNullOrEmpty(path)) return false;
+        var active = !string.IsNullOrEmpty(_activeFilePath) ? _activeFilePath : _selectedFilePath;
+        if (string.Equals(path, active, StringComparison.OrdinalIgnoreCase))
+        {
+            return IsCurrentFileDirty;
+        }
+        return false;
+    }
 
     private readonly List<string> _testConsoleOutput = new();
     private string _activeConsoleTab = "terminal";
@@ -3270,8 +3543,47 @@
     {
         InvokeAsync(async () =>
         {
-            await RefreshTestFiles(savedPath);
-            _statusText = $"Opened generated file: {savedPath}";
+            _lastAgentSavedFilePath = savedPath;
+            _lastAgentSavedTime = DateTime.Now;
+
+            var normSaved = savedPath.Replace('/', '\\');
+            var savedName = Path.GetFileName(savedPath);
+            var isCurrentFile = !string.IsNullOrEmpty(_activeFilePath) &&
+                (string.Equals(_activeFilePath.Replace('/', '\\'), normSaved, StringComparison.OrdinalIgnoreCase) ||
+                 string.Equals(Path.GetFileName(_activeFilePath), savedName, StringComparison.OrdinalIgnoreCase));
+
+            if (isCurrentFile)
+            {
+                if (IsCurrentFileDirty)
+                {
+                    _testFiles = await AgentService.GetExistingTestFilesAsync();
+                    _showAgentConflictBanner = true;
+                    _showAgentDiskUpdateBanner = false;
+                    _statusText = $"AI updated {savedName} on disk, but you have unsaved editor edits.";
+                }
+                else
+                {
+                    await RefreshTestFiles(savedPath);
+                    _showAgentDiskUpdateBanner = true;
+                    _showAgentConflictBanner = false;
+                    _statusText = $"AI saved and updated {savedName} on disk.";
+                }
+            }
+            else
+            {
+                if (IsCurrentFileDirty)
+                {
+                    _testFiles = await AgentService.GetExistingTestFilesAsync();
+                    _statusText = $"AI created/updated {savedName} on disk (switch file to view).";
+                }
+                else
+                {
+                    await RefreshTestFiles(savedPath);
+                    _showAgentDiskUpdateBanner = true;
+                    _showAgentConflictBanner = false;
+                    _statusText = $"Opened generated file: {savedPath}";
+                }
+            }
             StateHasChanged();
         });
     }
@@ -3409,10 +3721,26 @@
 
     private void HandleAgentStatusUpdate(string status)
     {
-        InvokeAsync(() =>
+        InvokeAsync(async () =>
         {
             _statusText = status;
+            if (_isAgentBusy)
+            {
+                foreach (var step in _agentActivitySteps)
+                {
+                    step.IsActive = false;
+                }
+
+                _agentActivitySteps.Add(new AgentActivityStep
+                {
+                    Description = status,
+                    Timestamp = DateTime.Now,
+                    IsActive = true,
+                    IsError = status.Contains("error", StringComparison.OrdinalIgnoreCase) || status.Contains("failed", StringComparison.OrdinalIgnoreCase)
+                });
+            }
             StateHasChanged();
+            await ScrollChatToBottomAsync();
         });
     }
 
@@ -3445,6 +3773,25 @@
         _promptInput = "";
         _streamingChunk = "";
         _isAgentBusy = true;
+        _agentElapsedSeconds = 0;
+        _showAllAgentSteps = false;
+        _agentActivitySteps.Clear();
+        _agentActivitySteps.Add(new AgentActivityStep
+        {
+            Description = $"Prompt submitted. Querying {_selectedProviderKey}...",
+            Timestamp = DateTime.Now,
+            IsActive = true
+        });
+
+        _agentElapsedTimer?.Dispose();
+        _agentElapsedTimer = new System.Timers.Timer(1000);
+        _agentElapsedTimer.Elapsed += (s, e) =>
+        {
+            _agentElapsedSeconds++;
+            InvokeAsync(StateHasChanged);
+        };
+        _agentElapsedTimer.Start();
+
         _agentCts = new CancellationTokenSource();
 
         try
@@ -3456,13 +3803,30 @@
         catch (OperationCanceledException)
         {
             _statusText = "Agent cancelled.";
+            _agentActivitySteps.Add(new AgentActivityStep
+            {
+                Description = "Agent execution cancelled by user.",
+                Timestamp = DateTime.Now,
+                IsActive = false,
+                IsError = true
+            });
         }
         catch (Exception ex)
         {
             _statusText = $"Agent error: {ex.Message}";
+            _agentActivitySteps.Add(new AgentActivityStep
+            {
+                Description = $"Error: {ex.Message}",
+                Timestamp = DateTime.Now,
+                IsActive = false,
+                IsError = true
+            });
         }
         finally
         {
+            _agentElapsedTimer?.Stop();
+            _agentElapsedTimer?.Dispose();
+            _agentElapsedTimer = null;
             _streamingChunk = "";
             _isAgentBusy = false;
             _agentCts?.Dispose();
@@ -3482,6 +3846,42 @@
         await AgentService.ResetConversationAsync();
         _streamingChunk = "";
         _statusText = "Agent conversation reset.";
+    }
+
+    private async Task CopyChatMessageAsync(string text, int index)
+    {
+        if (string.IsNullOrEmpty(text)) return;
+        try
+        {
+            await JS.InvokeVoidAsync("studioUi.copyToClipboard", text);
+            _copiedMessageIndex = index;
+            StateHasChanged();
+            _ = Task.Run(async () =>
+            {
+                await Task.Delay(2000);
+                if (_copiedMessageIndex == index)
+                {
+                    _copiedMessageIndex = null;
+                    await InvokeAsync(StateHasChanged);
+                }
+            });
+        }
+        catch { }
+    }
+
+    private void PasteToPrompt(string text)
+    {
+        if (string.IsNullOrWhiteSpace(text)) return;
+        var quoted = string.Join("\n", text.Split('\n').Select(l => $"> {l.TrimEnd()}"));
+        if (string.IsNullOrWhiteSpace(_promptInput))
+        {
+            _promptInput = quoted + "\n\n";
+        }
+        else
+        {
+            _promptInput = _promptInput.TrimEnd() + "\n\n" + quoted + "\n\n";
+        }
+        StateHasChanged();
     }
 
     private async Task RefreshTestFiles(string? targetFilePath = null)
@@ -3508,6 +3908,7 @@
             if (match != null)
             {
                 _selectedFilePath = match.RelativePath;
+                _activeFilePath = match.RelativePath;
                 _currentFileContent = match.Content;
                 await SyncEditorToCurrentFileAsync();
                 return;
@@ -3519,8 +3920,12 @@
             var match = _testFiles.FirstOrDefault(f => string.Equals(f.RelativePath, _selectedFilePath, StringComparison.OrdinalIgnoreCase));
             if (match != null)
             {
-                _currentFileContent = match.Content;
-                await SyncEditorToCurrentFileAsync();
+                _activeFilePath = match.RelativePath;
+                if (!IsCurrentFileDirty)
+                {
+                    _currentFileContent = match.Content;
+                    await SyncEditorToCurrentFileAsync();
+                }
                 return;
             }
         }
@@ -3528,11 +3933,13 @@
         if (_testFiles.Count > 0)
         {
             _selectedFilePath = _testFiles[0].RelativePath;
+            _activeFilePath = _testFiles[0].RelativePath;
             _currentFileContent = _testFiles[0].Content;
         }
         else
         {
             _selectedFilePath = "";
+            _activeFilePath = "";
             _currentFileContent = "";
         }
 
@@ -3555,18 +3962,115 @@
     private async Task OnFileSelected()
     {
         _showDeleteConfirm = false;
-        var file = _testFiles.FirstOrDefault(f => f.RelativePath == _selectedFilePath);
+        _showAgentConflictBanner = false;
+        _showAgentDiskUpdateBanner = false;
+
+        if (string.Equals(_selectedFilePath, _activeFilePath, StringComparison.OrdinalIgnoreCase))
+        {
+            return;
+        }
+
+        // Pull latest editor value in case CodeMirror hasn't flushed back yet
+        try
+        {
+            var latest = await JS.InvokeAsync<string>("studioCodeEditor.getValue");
+            if (latest != null)
+            {
+                _currentFileContent = latest;
+            }
+        }
+        catch { }
+
+        if (IsCurrentFileDirty)
+        {
+            _pendingSwitchFilePath = _selectedFilePath;
+            _selectedFilePath = _activeFilePath;
+            _showUnsavedSwitchConfirm = true;
+            StateHasChanged();
+            return;
+        }
+
+        await CompleteFileSwitchAsync(_selectedFilePath);
+    }
+
+    private async Task CompleteFileSwitchAsync(string newPath)
+    {
+        _pendingSwitchFilePath = null;
+        _showUnsavedSwitchConfirm = false;
+        _selectedFilePath = newPath;
+        _activeFilePath = newPath;
+
+        var file = _testFiles.FirstOrDefault(f => string.Equals(f.RelativePath, newPath, StringComparison.OrdinalIgnoreCase));
         if (file != null)
         {
             _currentFileContent = file.Content;
             await SyncEditorToCurrentFileAsync();
+            _statusText = $"Loaded {file.FileName}";
+        }
+        StateHasChanged();
+    }
+
+    private async Task ConfirmSaveAndSwitch()
+    {
+        if (!string.IsNullOrEmpty(_pendingSwitchFilePath))
+        {
+            var nextFile = _pendingSwitchFilePath;
+            await SaveCurrentFileEdits();
+            await CompleteFileSwitchAsync(nextFile);
+        }
+        else
+        {
+            _showUnsavedSwitchConfirm = false;
+        }
+    }
+
+    private async Task ConfirmDiscardAndSwitch()
+    {
+        if (!string.IsNullOrEmpty(_pendingSwitchFilePath))
+        {
+            var nextFile = _pendingSwitchFilePath;
+            await CompleteFileSwitchAsync(nextFile);
+        }
+        else
+        {
+            _showUnsavedSwitchConfirm = false;
+        }
+    }
+
+    private void CancelSwitch()
+    {
+        _pendingSwitchFilePath = null;
+        _showUnsavedSwitchConfirm = false;
+    }
+
+    private async Task RevertCurrentFileEdits()
+    {
+        _showAgentConflictBanner = false;
+        _currentFileContent = ActiveFileDiskContent;
+        await SyncEditorToCurrentFileAsync();
+        _statusText = $"Reverted {Path.GetFileName(!string.IsNullOrEmpty(_activeFilePath) ? _activeFilePath : _selectedFilePath)} to disk version.";
+        StateHasChanged();
+    }
+
+    private async Task ReloadCurrentFileFromDisk()
+    {
+        _showAgentConflictBanner = false;
+        _testFiles = await AgentService.GetExistingTestFilesAsync();
+        var match = _testFiles.FirstOrDefault(f => string.Equals(f.RelativePath, _selectedFilePath, StringComparison.OrdinalIgnoreCase));
+        if (match != null)
+        {
+            _currentFileContent = match.Content;
+            await SyncEditorToCurrentFileAsync();
+            _statusText = $"Reloaded {Path.GetFileName(_selectedFilePath)} from disk.";
+            StateHasChanged();
         }
     }
 
     [JSInvokable]
-    public void OnEditorContentChanged(string newContent)
+    public async Task OnEditorContentChanged(string newContent)
     {
         _currentFileContent = newContent;
+        await InvokeAsync(StateHasChanged);
     }
 
     [JSInvokable]
@@ -3616,13 +4120,13 @@
 
     private async Task ConfirmDeleteCurrentFile()
     {
-        if (string.IsNullOrEmpty(_selectedFilePath))
+        var fileToDelete = !string.IsNullOrEmpty(_activeFilePath) ? _activeFilePath : _selectedFilePath;
+        if (string.IsNullOrEmpty(fileToDelete))
         {
             _showDeleteConfirm = false;
             return;
         }
 
-        var fileToDelete = _selectedFilePath;
         _showDeleteConfirm = false;
         _statusText = $"Deleting {Path.GetFileName(fileToDelete)}...";
 
@@ -3631,6 +4135,7 @@
         {
             _statusText = $"Deleted {Path.GetFileName(fileToDelete)}";
             _selectedFilePath = "";
+            _activeFilePath = "";
             _currentFileContent = "";
             await RefreshTestFiles();
         }
@@ -3647,7 +4152,8 @@
 
     private async Task SaveFileContentAsync(string? explicitContent)
     {
-        if (string.IsNullOrEmpty(_selectedFilePath))
+        var targetFile = !string.IsNullOrEmpty(_activeFilePath) ? _activeFilePath : _selectedFilePath;
+        if (string.IsNullOrEmpty(targetFile))
         {
             return;
         }
@@ -3670,10 +4176,12 @@
             catch { }
         }
 
-        _statusText = $"Saving {Path.GetFileName(_selectedFilePath)}...";
-        var res = await AgentService.SaveFileDirectAsync(_selectedFilePath, _currentFileContent);
+        _statusText = $"Saving {Path.GetFileName(targetFile)}...";
+        var res = await AgentService.SaveFileDirectAsync(targetFile, _currentFileContent);
         _statusText = res;
-        await RefreshTestFiles(_selectedFilePath);
+        _showAgentConflictBanner = false;
+        _showAgentDiskUpdateBanner = false;
+        await RefreshTestFiles(targetFile);
     }
 
     private async Task RunSpecFlowTests()
@@ -4180,6 +4688,7 @@
         AgentService.OnStatusUpdate -= HandleAgentStatusUpdate;
         AgentService.OnAgentMessageChunk -= HandleAgentMessageChunk;
         AgentService.OnFileSaved -= HandleFileSaved;
+        _agentElapsedTimer?.Dispose();
         _agentCts?.Cancel();
         _testCts?.Cancel();
         _dotNetRef?.Dispose();
