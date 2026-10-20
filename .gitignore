@@ -1,7 +1,8 @@
-## Visual Studio / VS Code
+## Visual Studio / VS Code / IDE
 .vs/
 .vscode/
 .idea/
+.agents/
 *.suo
 *.user
 *.userosscache
