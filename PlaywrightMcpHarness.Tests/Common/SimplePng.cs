@@ -106,12 +106,19 @@ public class SimplePngImage
         int height = 0;
         int bitDepth = 0;
         int colorType = 0;
+        int interlace = 0;
+        byte[]? palette = null;
+        byte[]? paletteAlpha = null;
         using var idatStream = new MemoryStream();
 
         while (ms.Position < ms.Length)
         {
             if (ms.Length - ms.Position < 8) break;
             int length = ReadBigEndianInt32(reader);
+            if (length < 0 || ms.Position + 4 + length > ms.Length)
+            {
+                throw new FormatException("Corrupted PNG chunk length.");
+            }
             var chunkType = new string(reader.ReadChars(4));
 
             if (chunkType == "IHDR")
@@ -120,13 +127,24 @@ public class SimplePngImage
                 height = ReadBigEndianInt32(reader);
                 bitDepth = reader.ReadByte();
                 colorType = reader.ReadByte();
-                reader.ReadBytes(3); // compression, filter, interlace
+                reader.ReadBytes(2); // compression, filter
+                interlace = reader.ReadByte();
+                reader.ReadInt32(); // CRC
+            }
+            else if (chunkType == "PLTE")
+            {
+                palette = reader.ReadBytes(length);
+                reader.ReadInt32(); // CRC
+            }
+            else if (chunkType == "tRNS")
+            {
+                paletteAlpha = reader.ReadBytes(length);
                 reader.ReadInt32(); // CRC
             }
             else if (chunkType == "IDAT")
             {
                 var chunkData = reader.ReadBytes(length);
-                idatStream.Write(chunkData, 0, length);
+                idatStream.Write(chunkData, 0, chunkData.Length);
                 reader.ReadInt32(); // CRC
             }
             else if (chunkType == "IEND")
@@ -146,9 +164,16 @@ public class SimplePngImage
             throw new FormatException("Missing or invalid IHDR chunk in PNG.");
         }
 
+        if (interlace != 0)
+        {
+            throw new NotSupportedException("Interlaced PNG images are not supported.");
+        }
+
         int bytesPerPixel = colorType switch
         {
             6 => 4, // RGBA
+            4 => 2, // Grayscale + Alpha
+            3 => 1, // Indexed Palette
             2 => 3, // RGB
             0 => 1, // Grayscale
             _ => throw new NotSupportedException($"PNG color type {colorType} is not supported.")
@@ -219,6 +244,28 @@ public class SimplePngImage
                     result.RgbaPixels[destPixel + 1] = currRow[srcPixel + 1]; // G
                     result.RgbaPixels[destPixel + 2] = currRow[srcPixel + 2]; // B
                     result.RgbaPixels[destPixel + 3] = 255;                   // A
+                }
+                else if (colorType == 4) // Grayscale + Alpha
+                {
+                    byte g = currRow[srcPixel];
+                    result.RgbaPixels[destPixel] = g;
+                    result.RgbaPixels[destPixel + 1] = g;
+                    result.RgbaPixels[destPixel + 2] = g;
+                    result.RgbaPixels[destPixel + 3] = currRow[srcPixel + 1];
+                }
+                else if (colorType == 3) // Indexed Palette
+                {
+                    byte idx = currRow[srcPixel];
+                    int palOffset = idx * 3;
+                    if (palette != null && palOffset + 2 < palette.Length)
+                    {
+                        result.RgbaPixels[destPixel] = palette[palOffset];
+                        result.RgbaPixels[destPixel + 1] = palette[palOffset + 1];
+                        result.RgbaPixels[destPixel + 2] = palette[palOffset + 2];
+                    }
+                    result.RgbaPixels[destPixel + 3] = (paletteAlpha != null && idx < paletteAlpha.Length)
+                        ? paletteAlpha[idx]
+                        : (byte)255;
                 }
                 else // Grayscale
                 {

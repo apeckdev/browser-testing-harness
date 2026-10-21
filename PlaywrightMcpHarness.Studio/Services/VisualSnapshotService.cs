@@ -204,13 +204,5 @@ public class VisualSnapshotService : IVisualSnapshotService
         }
     }
 
-    private string GetTestsProjectRoot()
-    {
-        var testsProjectDir = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, _config.TestsProjectPath));
-        if (!Directory.Exists(testsProjectDir) && Directory.Exists(Path.GetFullPath(_config.TestsProjectPath)))
-        {
-            testsProjectDir = Path.GetFullPath(_config.TestsProjectPath);
-        }
-        return testsProjectDir;
-    }
+    private string GetTestsProjectRoot() => _config.ResolveTestsProjectRoot();
 }

@@ -446,29 +446,32 @@
                                 </button>
                             }
 
-                            @if (_showDeleteConfirm)
+                            @if (!string.Equals(Path.GetFileName(_selectedFilePath), "VisualSteps.cs", StringComparison.OrdinalIgnoreCase))
                             {
-                                <div class="d-flex align-items-center gap-1 bg-danger bg-opacity-10 border border-danger border-opacity-25 rounded px-2 py-0">
-                                    <span class="text-danger small" style="font-size: 0.75rem;">Delete file?</span>
-                                    <button class="btn btn-sm btn-danger py-0 px-2" style="font-size: 0.75rem;"
-                                            @onclick="ConfirmDeleteCurrentFile"
+                                @if (_showDeleteConfirm)
+                                {
+                                    <div class="d-flex align-items-center gap-1 bg-danger bg-opacity-10 border border-danger border-opacity-25 rounded px-2 py-0">
+                                        <span class="text-danger small" style="font-size: 0.75rem;">Delete file?</span>
+                                        <button class="btn btn-sm btn-danger py-0 px-2" style="font-size: 0.75rem;"
+                                                @onclick="ConfirmDeleteCurrentFile"
+                                                disabled="@(_isAgentBusy || _isTestRunning)">
+                                            Confirm
+                                        </button>
+                                        <button class="btn btn-sm btn-outline-secondary py-0 px-1" style="font-size: 0.75rem;"
+                                                @onclick="() => _showDeleteConfirm = false">
+                                            Cancel
+                                        </button>
+                                    </div>
+                                }
+                                else
+                                {
+                                    <button class="btn btn-sm btn-outline-danger d-flex align-items-center gap-1 py-0 px-2"
+                                            title="Delete this file from the test suite"
+                                            @onclick="() => _showDeleteConfirm = true"
                                             disabled="@(_isAgentBusy || _isTestRunning)">
-                                        Confirm
+                                        <i class="bi bi-trash"></i> Delete
                                     </button>
-                                    <button class="btn btn-sm btn-outline-secondary py-0 px-1" style="font-size: 0.75rem;"
-                                            @onclick="() => _showDeleteConfirm = false">
-                                        Cancel
-                                    </button>
-                                </div>
-                            }
-                            else
-                            {
-                                <button class="btn btn-sm btn-outline-danger d-flex align-items-center gap-1 py-0 px-2"
-                                        title="Delete this file from the test suite"
-                                        @onclick="() => _showDeleteConfirm = true"
-                                        disabled="@(_isAgentBusy || _isTestRunning)">
-                                    <i class="bi bi-trash"></i> Delete
-                                </button>
+                                }
                             }
 
                             <!-- Suite Tools Dropdown -->
@@ -2997,8 +3000,7 @@
         if (match != null)
         {
             _selectedFilePath = match.RelativePath;
-            _currentFileContent = match.Content;
-            await SyncEditorToCurrentFileAsync();
+            await OnFileSelected();
             _statusText = $"Opened {finding.SourceFile} at line {finding.LineNumber} ({finding.MethodName})";
         }
     }
@@ -3474,8 +3476,7 @@
         if (match != null)
         {
             _selectedFilePath = match.RelativePath;
-            _currentFileContent = match.Content;
-            await SyncEditorToCurrentFileAsync();
+            await OnFileSelected();
             _statusText = $"Opened Page Object: {po.FileName}";
         }
     }
@@ -4056,12 +4057,15 @@
     {
         _showAgentConflictBanner = false;
         _testFiles = await AgentService.GetExistingTestFilesAsync();
-        var match = _testFiles.FirstOrDefault(f => string.Equals(f.RelativePath, _selectedFilePath, StringComparison.OrdinalIgnoreCase));
+        var targetPath = !string.IsNullOrEmpty(_activeFilePath) ? _activeFilePath : _selectedFilePath;
+        var match = _testFiles.FirstOrDefault(f => string.Equals(f.RelativePath, targetPath, StringComparison.OrdinalIgnoreCase));
         if (match != null)
         {
+            _selectedFilePath = match.RelativePath;
+            _activeFilePath = match.RelativePath;
             _currentFileContent = match.Content;
             await SyncEditorToCurrentFileAsync();
-            _statusText = $"Reloaded {Path.GetFileName(_selectedFilePath)} from disk.";
+            _statusText = $"Reloaded {Path.GetFileName(match.RelativePath)} from disk.";
             StateHasChanged();
         }
     }
@@ -4261,7 +4265,13 @@
             foreach (var sc in _testScenarios)
             {
                 var sanitized = System.Text.RegularExpressions.Regex.Replace(sc.Name, @"[^a-zA-Z0-9_\-]", "_");
-                if (Directory.Exists(tracesDir) && File.Exists(Path.Combine(tracesDir, $"{sanitized}.zip")))
+
+                // Preserve trace file captured from [ARTIFACT_TRACE] if it exists on disk
+                if (!string.IsNullOrEmpty(sc.TraceFileName) && Directory.Exists(tracesDir) && File.Exists(Path.Combine(tracesDir, sc.TraceFileName)))
+                {
+                    // Validated
+                }
+                else if (Directory.Exists(tracesDir) && File.Exists(Path.Combine(tracesDir, $"{sanitized}.zip")))
                 {
                     sc.TraceFileName = $"{sanitized}.zip";
                 }
@@ -4270,7 +4280,12 @@
                     sc.TraceFileName = null;
                 }
 
-                if (Directory.Exists(screenshotsDir) && File.Exists(Path.Combine(screenshotsDir, $"{sanitized}.png")))
+                // Preserve screenshot file captured from [ARTIFACT_SCREENSHOT] if it exists on disk
+                if (!string.IsNullOrEmpty(sc.ScreenshotFileName) && Directory.Exists(screenshotsDir) && File.Exists(Path.Combine(screenshotsDir, sc.ScreenshotFileName)))
+                {
+                    // Validated
+                }
+                else if (Directory.Exists(screenshotsDir) && File.Exists(Path.Combine(screenshotsDir, $"{sanitized}.png")))
                 {
                     sc.ScreenshotFileName = $"{sanitized}.png";
                 }
@@ -4279,7 +4294,13 @@
                     sc.ScreenshotFileName = null;
                 }
 
-                if (Directory.Exists(visualDir) && (File.Exists(Path.Combine(visualDir, $"{sanitized}.diff.png")) || File.Exists(Path.Combine(visualDir, $"{sanitized}.actual.png"))))
+                // Preserve visual diff snapshot captured from [VISUAL_DIFF_FAILED] if it exists on disk
+                if (!string.IsNullOrEmpty(sc.VisualDiffSnapshotName) && Directory.Exists(visualDir) &&
+                    (File.Exists(Path.Combine(visualDir, $"{sc.VisualDiffSnapshotName}.diff.png")) || File.Exists(Path.Combine(visualDir, $"{sc.VisualDiffSnapshotName}.actual.png"))))
+                {
+                    // Validated
+                }
+                else if (Directory.Exists(visualDir) && (File.Exists(Path.Combine(visualDir, $"{sanitized}.diff.png")) || File.Exists(Path.Combine(visualDir, $"{sanitized}.actual.png"))))
                 {
                     sc.VisualDiffSnapshotName = sanitized;
                 }
@@ -4348,17 +4369,32 @@
             }
         }
 
-        // Extract error lines from console output
+        // Extract meaningful error and SpecFlow step diagnostic lines from console output,
+        // filtering out repetitive xUnit/SpecFlow internal reflection stack frames.
         var relevantLines = _testConsoleOutput
+            .Where(l => !l.Contains("at TechTalk.SpecFlow.", StringComparison.OrdinalIgnoreCase)
+                     && !l.Contains("at System.RuntimeMethodHandle", StringComparison.OrdinalIgnoreCase)
+                     && !l.Contains("at System.Reflection.", StringComparison.OrdinalIgnoreCase))
             .Where(l => l.Contains("Failed", StringComparison.OrdinalIgnoreCase)
                      || l.Contains("Error", StringComparison.OrdinalIgnoreCase)
                      || l.Contains("Exception", StringComparison.OrdinalIgnoreCase)
-                     || l.Contains("Stack Trace:", StringComparison.OrdinalIgnoreCase)
                      || l.Contains("at PlaywrightMcpHarness", StringComparison.OrdinalIgnoreCase)
                      || l.Contains("-> error:", StringComparison.OrdinalIgnoreCase)
-                     || l.StartsWith("   at ")
+                     || l.Contains("-> No matching step definition", StringComparison.OrdinalIgnoreCase)
+                     || l.Contains("-> pending:", StringComparison.OrdinalIgnoreCase)
+                     || l.Contains("Standard Output Messages:", StringComparison.OrdinalIgnoreCase)
+                     || l.Contains("Expected:", StringComparison.OrdinalIgnoreCase)
+                     || l.Contains("Actual:", StringComparison.OrdinalIgnoreCase)
+                     || l.Contains("Received:", StringComparison.OrdinalIgnoreCase)
+                     || l.Contains("Call log:", StringComparison.OrdinalIgnoreCase)
+                     || l.Contains("waiting for ", StringComparison.OrdinalIgnoreCase)
+                     || l.Contains("strict mode violation", StringComparison.OrdinalIgnoreCase)
+                     || l.TrimStart().StartsWith("Given ", StringComparison.Ordinal)
+                     || l.TrimStart().StartsWith("When ", StringComparison.Ordinal)
+                     || l.TrimStart().StartsWith("Then ", StringComparison.Ordinal)
+                     || l.TrimStart().StartsWith("And ", StringComparison.Ordinal)
                      || l.Contains("Assert."))
-            .Take(30)
+            .TakeLast(80)
             .ToList();
 
         if (relevantLines.Count > 0)
@@ -4385,7 +4421,7 @@
             sb.AppendLine();
         }
 
-        sb.AppendLine("Please diagnose the root cause and provide the corrected feature steps and/or step definitions.");
+        sb.AppendLine("Please diagnose the root cause, verify exact URLs and headings using ReadExistingTestFiles or Playwright MCP browser tools (never guess URLs or delete existing switch cases used by other features), and call SaveStepDefinitionFile and/or SaveFeatureFile to write the fixes to disk. Do NOT paste full code files in chat.");
 
         _promptInput = sb.ToString();
         await SendPromptToAgent();
@@ -4450,6 +4486,15 @@
                 }
             }
         }
+        else if (trimmed.StartsWith("-> error:", StringComparison.OrdinalIgnoreCase) ||
+                 trimmed.StartsWith("-> No matching step definition", StringComparison.OrdinalIgnoreCase))
+        {
+            var lastFailed = _testScenarios.LastOrDefault(s => !s.Passed) ?? _testScenarios.LastOrDefault();
+            if (lastFailed != null && string.IsNullOrEmpty(lastFailed.ErrorMessage))
+            {
+                lastFailed.ErrorMessage = trimmed.TrimStart('-', '>').Trim();
+            }
+        }
         else if (trimmed.StartsWith("[ARTIFACT_SCREENSHOT] ", StringComparison.OrdinalIgnoreCase))
         {
             var fileName = trimmed.Substring(22).Trim();
@@ -4481,7 +4526,11 @@
                 var pctEnd = pctPart.IndexOf('%');
                 if (pctEnd > 0)
                 {
-                    double.TryParse(pctPart.Substring(0, pctEnd), out mismatchPct);
+                    double.TryParse(
+                        pctPart.Substring(0, pctEnd),
+                        System.Globalization.NumberStyles.Float,
+                        System.Globalization.CultureInfo.InvariantCulture,
+                        out mismatchPct);
                 }
             }
             var lastFailed = _testScenarios.LastOrDefault(s => !s.Passed);
@@ -4689,8 +4738,17 @@
         AgentService.OnAgentMessageChunk -= HandleAgentMessageChunk;
         AgentService.OnFileSaved -= HandleFileSaved;
         _agentElapsedTimer?.Dispose();
+        _outlineTimer?.Dispose();
         _agentCts?.Cancel();
+        _agentCts?.Dispose();
         _testCts?.Cancel();
+        _testCts?.Dispose();
+        _outlineCts?.Cancel();
+        _outlineCts?.Dispose();
+        _autoHealCts?.Cancel();
+        _autoHealCts?.Dispose();
+        _extractPoCts?.Cancel();
+        _extractPoCts?.Dispose();
         _dotNetRef?.Dispose();
     }
 }

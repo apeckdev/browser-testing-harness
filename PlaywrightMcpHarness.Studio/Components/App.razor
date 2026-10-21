@@ -142,6 +142,13 @@
                 this.dotNetHelper = dotNetRef;
                 var self = this;
 
+                if (this.instance) {
+                    var wrapper = this.instance.getWrapperElement();
+                    if (this.instance.getTextArea() !== el || !wrapper || !document.body.contains(wrapper)) {
+                        this.instance = null;
+                    }
+                }
+
                 if (!this.instance) {
                     this.instance = CodeMirror.fromTextArea(el, {
                         lineNumbers: true,
@@ -217,6 +224,10 @@
                         self.instance.refresh();
                     }
                 }, 50);
+            },
+
+            dispose: function () {
+                this.dotNetHelper = null;
             }
         };
 

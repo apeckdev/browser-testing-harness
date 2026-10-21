@@ -137,7 +137,8 @@ public class StepCatalogService : IStepCatalogService
         var sb = new StringBuilder();
         sb.AppendLine("### INDEXED SPECFLOW STEP DEFINITIONS LIBRARY (REUSE THESE FIRST):");
         sb.AppendLine("Always reuse these existing steps in your .feature scenarios whenever possible.");
-        sb.AppendLine("Only write new C# step definitions when an action or assertion is not covered below.\n");
+        sb.AppendLine("Only write new C# step definitions when an action or assertion is not covered below.");
+        sb.AppendLine("IMPORTANT: In the list below, `{param}` is only a display placeholder showing the C# parameter name. When writing C# `[Given(...)]` / `[When(...)]` / `[Then(...)]` attributes in SpecFlow v3.9, you MUST use the Regex pattern (e.g. `(.*)` or `([0-9.]+)`), NEVER `{paramName}`!\n");
 
         var grouped = _cachedSteps.GroupBy(s => s.StepType);
         foreach (var group in grouped.OrderBy(g => GetStepTypeOrder(g.Key)))
@@ -148,7 +149,7 @@ public class StepCatalogService : IStepCatalogService
                 var paramDesc = step.Parameters.Count > 0
                     ? $" (Parameters: {string.Join(", ", step.Parameters.Select(p => $"{p.Type} {p.Name}"))})"
                     : "";
-                sb.AppendLine($"- {step.StepType} {step.NormalizedPattern} [File: {step.SourceFile}]{paramDesc}");
+                sb.AppendLine($"- {step.StepType} {step.NormalizedPattern} [Regex: {step.Pattern}] [File: {step.SourceFile}]{paramDesc}");
             }
             sb.AppendLine();
         }
@@ -166,12 +167,7 @@ public class StepCatalogService : IStepCatalogService
 
     private string GetStepDefinitionsDirectory()
     {
-        var testsProjectDir = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, _config.TestsProjectPath));
-        if (!Directory.Exists(testsProjectDir) && Directory.Exists(Path.GetFullPath(_config.TestsProjectPath)))
-        {
-            testsProjectDir = Path.GetFullPath(_config.TestsProjectPath);
-        }
-        return Path.Combine(testsProjectDir, "StepDefinitions");
+        return Path.Combine(_config.ResolveTestsProjectRoot(), "StepDefinitions");
     }
 
     internal static List<StepDefinitionInfo> ParseStepDefinitionsFromSource(string sourceCode, string fileName)
@@ -203,7 +199,9 @@ public class StepCatalogService : IStepCatalogService
                 }
                 else
                 {
-                    pattern = Regex.Unescape(attrMatch.Groups["regular"].Value);
+                    pattern = attrMatch.Groups["regular"].Value
+                        .Replace("\\\"", "\"")
+                        .Replace("\\\\", "\\");
                 }
 
                 pendingAttributes.Add((stepType, pattern, i + 1));
@@ -272,13 +270,13 @@ public class StepCatalogService : IStepCatalogService
         return result;
     }
 
+    private static readonly Regex CaptureGroupRegex = new(@"(?<!\\)\((?!\?)[^)]+\)", RegexOptions.Compiled);
+
     private static string NormalizePattern(string rawPattern, List<StepParameterInfo> parameters)
     {
-        // Replace regex placeholders like (.*), ([^"]*), (\d+) with {paramName}
-        var placeholderRegex = new Regex(@"\((?:\.\*|\.\*\?|\[\^""\]\*|\d\+|\\d\+)\)", RegexOptions.Compiled);
         int paramIndex = 0;
 
-        var normalized = placeholderRegex.Replace(rawPattern, m =>
+        var normalized = CaptureGroupRegex.Replace(rawPattern, _ =>
         {
             if (paramIndex < parameters.Count)
             {
@@ -296,16 +294,26 @@ public class StepCatalogService : IStepCatalogService
 
     private static string BuildAutocompleteSnippet(string rawPattern, List<StepParameterInfo> parameters)
     {
-        var placeholderRegex = new Regex(@"\((?:\.\*|\.\*\?|\[\^""\]\*|\d\+|\\d\+)\)", RegexOptions.Compiled);
         int paramIndex = 0;
 
-        var snippet = placeholderRegex.Replace(rawPattern, m =>
+        var snippet = CaptureGroupRegex.Replace(rawPattern, m =>
         {
-            if (paramIndex < parameters.Count)
+            var paramName = paramIndex < parameters.Count
+                ? parameters[paramIndex].Name
+                : $"arg{paramIndex + 1}";
+            var paramType = paramIndex < parameters.Count
+                ? parameters[paramIndex].Type
+                : "string";
+            paramIndex++;
+
+            bool alreadyQuoted = m.Index > 0 && (rawPattern[m.Index - 1] == '"' || rawPattern[m.Index - 1] == '\'');
+            bool isNumeric = paramType is "int" or "long" or "double" or "float" or "decimal";
+
+            if (alreadyQuoted || isNumeric)
             {
-                return $"\"{parameters[paramIndex++].Name}\"";
+                return paramName;
             }
-            return $"\"arg{++paramIndex}\"";
+            return $"\"{paramName}\"";
         });
 
         if (snippet.StartsWith('^')) snippet = snippet[1..];

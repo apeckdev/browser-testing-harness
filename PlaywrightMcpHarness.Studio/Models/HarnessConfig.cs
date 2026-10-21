@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.IO;
 
 namespace PlaywrightMcpHarness.Studio.Models;
 
@@ -14,6 +15,37 @@ public class HarnessConfig
     public double VisualTolerancePercent { get; set; } = 0.2;
     public Dictionary<string, LlmProviderConfig> Providers { get; set; } = new(StringComparer.OrdinalIgnoreCase);
     public PlaywrightMcpConfig PlaywrightMcp { get; set; } = new();
+
+    public string ResolveTestsProjectRoot()
+    {
+        var path = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, TestsProjectPath));
+        if (!Directory.Exists(path) && Directory.Exists(Path.GetFullPath(TestsProjectPath)))
+        {
+            path = Path.GetFullPath(TestsProjectPath);
+        }
+        return path;
+    }
+
+    public string ResolveSafePath(string relativePath, string? subDirectory = null)
+    {
+        var root = Path.GetFullPath(ResolveTestsProjectRoot());
+        var baseDir = string.IsNullOrWhiteSpace(subDirectory)
+            ? root
+            : Path.GetFullPath(Path.Combine(root, subDirectory));
+
+        var combined = Path.GetFullPath(Path.Combine(baseDir, relativePath));
+        var rootWithSep = root.EndsWith(Path.DirectorySeparatorChar)
+            ? root
+            : root + Path.DirectorySeparatorChar;
+
+        if (!combined.Equals(root, StringComparison.OrdinalIgnoreCase) &&
+            !combined.StartsWith(rootWithSep, StringComparison.OrdinalIgnoreCase))
+        {
+            throw new UnauthorizedAccessException($"Path '{relativePath}' resolves outside the test project root.");
+        }
+
+        return combined;
+    }
 }
 
 public class LlmProviderConfig

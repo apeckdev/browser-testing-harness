@@ -1,4 +1,5 @@
 using System;
+using System.Globalization;
 using System.IO;
 using System.Threading.Tasks;
 using Microsoft.Playwright;
@@ -18,9 +19,8 @@ public class VisualSteps
         _page = page;
     }
 
-    [Given(@"I am on the ""(.*)"" page")]
     [Given(@"I navigate to ""(.*)""")]
-    public async Task GivenIAmOnThePageAsync(string url)
+    public async Task GivenINavigateToAsync(string url)
     {
         await _page.GotoAsync(url);
         await _page.WaitForLoadStateAsync(LoadState.DOMContentLoaded);
@@ -83,8 +83,22 @@ public class VisualSteps
         }
         else if (selector.StartsWith("role=", StringComparison.OrdinalIgnoreCase))
         {
-            var roleName = selector.Substring(5);
-            locator = _page.GetByRole(AriaRole.Region, new() { Name = roleName });
+            var roleSpec = selector.Substring(5).Trim();
+            var colonIndex = roleSpec.IndexOf(':');
+            if (colonIndex > 0 &&
+                Enum.TryParse<AriaRole>(roleSpec.Substring(0, colonIndex).Trim(), ignoreCase: true, out var parsedRole))
+            {
+                var roleName = roleSpec.Substring(colonIndex + 1).Trim();
+                locator = _page.GetByRole(parsedRole, new() { Name = roleName });
+            }
+            else if (Enum.TryParse<AriaRole>(roleSpec, ignoreCase: true, out var roleOnly))
+            {
+                locator = _page.GetByRole(roleOnly);
+            }
+            else
+            {
+                locator = _page.GetByRole(AriaRole.Region, new() { Name = roleSpec });
+            }
         }
         else
         {
@@ -137,14 +151,14 @@ public class VisualSteps
                 File.Delete(diffPath);
             }
 
-            Console.WriteLine($"[VISUAL_DIFF_PASSED] {snapshotName} Mismatch: {result.MismatchPercentage:F2}% (Tolerance: {tolerancePercent:F2}%)");
+            Console.WriteLine(string.Create(CultureInfo.InvariantCulture, $"[VISUAL_DIFF_PASSED] {snapshotName} Mismatch: {result.MismatchPercentage:F2}% (Tolerance: {tolerancePercent:F2}%)"));
         }
         else
         {
             // Save highlighted diff image
             result.DiffImage?.SaveToFile(diffPath);
 
-            Console.WriteLine($"[VISUAL_DIFF_FAILED] {snapshotName} Mismatch: {result.MismatchPercentage:F2}% (Tolerance: {tolerancePercent:F2}%) Actual: {snapshotName}.actual.png Diff: {snapshotName}.diff.png");
+            Console.WriteLine(string.Create(CultureInfo.InvariantCulture, $"[VISUAL_DIFF_FAILED] {snapshotName} Mismatch: {result.MismatchPercentage:F2}% (Tolerance: {tolerancePercent:F2}%) Actual: {snapshotName}.actual.png Diff: {snapshotName}.diff.png"));
             throw new XunitException($"Visual regression detected for '{snapshotName}'. {result.Message}");
         }
     }
@@ -192,7 +206,7 @@ public class VisualSteps
     private static double GetDefaultTolerance()
     {
         var env = Environment.GetEnvironmentVariable("VISUAL_TOLERANCE_PERCENT");
-        return double.TryParse(env, out var val) ? val : 2.0;
+        return double.TryParse(env, NumberStyles.Float, CultureInfo.InvariantCulture, out var val) ? val : 0.2;
     }
 
     private static string SanitizeSnapshotName(string raw)

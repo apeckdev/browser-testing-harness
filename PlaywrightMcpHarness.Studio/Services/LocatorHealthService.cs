@@ -52,16 +52,25 @@ public class LocatorHealthService : ILocatorHealthService
         }
 
         var report = new LocatorHealthReport();
+        var testsProjectDir = _config.ResolveTestsProjectRoot();
         var stepDefsDir = GetStepDefinitionsDirectory();
+        var pagesDir = Path.Combine(testsProjectDir, "Pages");
 
-        if (!Directory.Exists(stepDefsDir))
+        var csFiles = new List<string>();
+        if (Directory.Exists(stepDefsDir))
+        {
+            csFiles.AddRange(Directory.GetFiles(stepDefsDir, "*Steps.cs", SearchOption.AllDirectories));
+        }
+        else
         {
             _logger.LogWarning("StepDefinitions directory not found at: {Path}", stepDefsDir);
-            _cachedReport = report;
-            return Task.FromResult(report);
         }
 
-        var csFiles = Directory.GetFiles(stepDefsDir, "*Steps.cs", SearchOption.AllDirectories);
+        if (Directory.Exists(pagesDir))
+        {
+            csFiles.AddRange(Directory.GetFiles(pagesDir, "*.cs", SearchOption.AllDirectories));
+        }
+
         var allFindings = new List<LocatorFinding>();
 
         foreach (var file in csFiles)
@@ -70,13 +79,13 @@ public class LocatorHealthService : ILocatorHealthService
             {
                 var content = File.ReadAllText(file);
                 var fileName = Path.GetFileName(file);
-                var relativePath = Path.GetRelativePath(stepDefsDir, file);
+                var relativePath = Path.GetRelativePath(testsProjectDir, file);
                 var findings = ParseLocatorsFromSource(content, fileName, relativePath);
                 allFindings.AddRange(findings);
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex, "Error scanning step file for locators: {File}", file);
+                _logger.LogError(ex, "Error scanning file for locators: {File}", file);
             }
         }
 
@@ -192,20 +201,23 @@ EXPLANATION:
 
     public async Task<string> ApplyLocatorRefactorAsync(string relativePath, string oldMethodSource, string newMethodSource)
     {
-        var stepDefsDir = GetStepDefinitionsDirectory();
-        var fullPath = Path.Combine(stepDefsDir, relativePath);
+        var fullPath = _config.ResolveSafePath(relativePath);
 
         if (!File.Exists(fullPath))
         {
-            // Try direct path search
-            var altPath = Path.Combine(stepDefsDir, Path.GetFileName(relativePath));
-            if (File.Exists(altPath))
+            var altStepPath = _config.ResolveSafePath(Path.GetFileName(relativePath), "StepDefinitions");
+            var altPagePath = _config.ResolveSafePath(Path.GetFileName(relativePath), "Pages");
+            if (File.Exists(altStepPath))
             {
-                fullPath = altPath;
+                fullPath = altStepPath;
+            }
+            else if (File.Exists(altPagePath))
+            {
+                fullPath = altPagePath;
             }
             else
             {
-                throw new FileNotFoundException($"Step definition file not found: {relativePath}");
+                throw new FileNotFoundException($"Source file not found: {relativePath}");
             }
         }
 
@@ -257,10 +269,35 @@ EXPLANATION:
             if (!inMethod && (trimmed.StartsWith("[Given(") || trimmed.StartsWith("[When(") || trimmed.StartsWith("[Then(") || trimmed.StartsWith("[StepDefinition(")))
             {
                 currentStepAttr = trimmed;
-                currentMethodStart = i;
-                currentMethodLines.Clear();
+                if (currentMethodStart < 0)
+                {
+                    currentMethodStart = i;
+                    currentMethodLines.Clear();
+                }
                 currentMethodLines.Add(line);
                 continue;
+            }
+
+            // Also detect non-attribute methods (e.g. inside Page Objects)
+            if (!inMethod && currentMethodStart < 0 &&
+                (trimmed.Contains("public async Task") || trimmed.Contains("public void") || trimmed.Contains("public Task") || trimmed.Contains("private async Task") || trimmed.Contains("private Task")))
+            {
+                var match = Regex.Match(trimmed, @"(?:public|private|internal|protected)\s+(?:async\s+)?(?:Task<[\w\s,]+>|Task|void)\s+(\w+)\s*\(");
+                if (match.Success)
+                {
+                    currentMethodStart = i;
+                    currentMethodName = match.Groups[1].Value;
+                    currentMethodLines.Clear();
+                    currentMethodLines.Add(line);
+                    var netBraces = CountCodeBraces(trimmed);
+                    if (netBraces > 0)
+                    {
+                        inMethod = true;
+                        openBraces = netBraces;
+                        InspectLineForLocators(line, i + 1, fileName, relativePath, currentMethodName, currentStepAttr, currentMethodLines, findings);
+                    }
+                    continue;
+                }
             }
 
             if (currentMethodStart >= 0 && !inMethod)
@@ -273,16 +310,17 @@ EXPLANATION:
                     {
                         currentMethodName = match.Groups[1].Value;
                     }
-                    if (trimmed.Contains("{"))
+                    var netBraces = CountCodeBraces(trimmed);
+                    if (netBraces > 0)
                     {
                         inMethod = true;
-                        openBraces = 1;
+                        openBraces = netBraces;
                     }
                 }
                 else if (trimmed.StartsWith("{"))
                 {
                     inMethod = true;
-                    openBraces = 1;
+                    openBraces = CountCodeBraces(trimmed);
                 }
                 continue;
             }
@@ -290,11 +328,7 @@ EXPLANATION:
             if (inMethod)
             {
                 currentMethodLines.Add(line);
-                foreach (char c in trimmed)
-                {
-                    if (c == '{') openBraces++;
-                    else if (c == '}') openBraces--;
-                }
+                openBraces += CountCodeBraces(trimmed);
 
                 // Scan this line for Playwright locators!
                 InspectLineForLocators(line, i + 1, fileName, relativePath, currentMethodName, currentStepAttr, currentMethodLines, findings);
@@ -319,6 +353,67 @@ EXPLANATION:
         }
 
         return findings;
+    }
+
+    private static int CountCodeBraces(string line)
+    {
+        int delta = 0;
+        bool inString = false;
+        bool isVerbatim = false;
+
+        for (int i = 0; i < line.Length; i++)
+        {
+            char c = line[i];
+
+            if (!inString)
+            {
+                // Stop at single-line comment
+                if (c == '/' && i + 1 < line.Length && line[i + 1] == '/')
+                {
+                    break;
+                }
+
+                if (c == '"')
+                {
+                    inString = true;
+                    isVerbatim = i > 0 && (line[i - 1] == '@' || (i > 1 && line[i - 1] == '$' && line[i - 2] == '@'));
+                    continue;
+                }
+
+                if (c == '{') delta++;
+                else if (c == '}') delta--;
+            }
+            else
+            {
+                if (isVerbatim)
+                {
+                    if (c == '"')
+                    {
+                        if (i + 1 < line.Length && line[i + 1] == '"')
+                        {
+                            i++; // Escaped quote in verbatim string
+                        }
+                        else
+                        {
+                            inString = false;
+                        }
+                    }
+                }
+                else
+                {
+                    if (c == '\\')
+                    {
+                        i++; // Skip escaped char
+                    }
+                    else if (c == '"')
+                    {
+                        inString = false;
+                    }
+                }
+            }
+        }
+
+        return delta;
     }
 
     private static void InspectLineForLocators(
@@ -358,7 +453,7 @@ EXPLANATION:
         // 2. GetByLabel
         if (trimmed.Contains("GetByLabel("))
         {
-            var match = Regex.Match(trimmed, @"(?:_page|Page|[\w]+)\.GetByLabel\(([^)]+)\)");
+            var match = Regex.Match(trimmed, @"(?:_page|Page|[\w]+)\.GetByLabel\(([^)]+(?:\([^)]*\))*[^)]*)\)");
             var expr = match.Success ? match.Value : "GetByLabel(...)";
             findings.Add(new LocatorFinding
             {
@@ -380,7 +475,7 @@ EXPLANATION:
         // 3. GetByPlaceholder
         if (trimmed.Contains("GetByPlaceholder("))
         {
-            var match = Regex.Match(trimmed, @"(?:_page|Page|[\w]+)\.GetByPlaceholder\(([^)]+)\)");
+            var match = Regex.Match(trimmed, @"(?:_page|Page|[\w]+)\.GetByPlaceholder\(([^)]+(?:\([^)]*\))*[^)]*)\)");
             var expr = match.Success ? match.Value : "GetByPlaceholder(...)";
             findings.Add(new LocatorFinding
             {
@@ -402,7 +497,7 @@ EXPLANATION:
         // 4. GetByTestId
         if (trimmed.Contains("GetByTestId("))
         {
-            var match = Regex.Match(trimmed, @"(?:_page|Page|[\w]+)\.GetByTestId\(([^)]+)\)");
+            var match = Regex.Match(trimmed, @"(?:_page|Page|[\w]+)\.GetByTestId\(([^)]+(?:\([^)]*\))*[^)]*)\)");
             var expr = match.Success ? match.Value : "GetByTestId(...)";
             findings.Add(new LocatorFinding
             {
@@ -424,7 +519,7 @@ EXPLANATION:
         // 5. GetByText
         if (trimmed.Contains("GetByText("))
         {
-            var match = Regex.Match(trimmed, @"(?:_page|Page|[\w]+)\.GetByText\(([^)]+)\)");
+            var match = Regex.Match(trimmed, @"(?:_page|Page|[\w]+)\.GetByText\(([^)]+(?:\([^)]*\))*[^)]*)\)");
             var expr = match.Success ? match.Value : "GetByText(...)";
             findings.Add(new LocatorFinding
             {
@@ -655,12 +750,7 @@ EXPLANATION:
 
     private string GetStepDefinitionsDirectory()
     {
-        var testsProjectDir = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, _config.TestsProjectPath));
-        if (!Directory.Exists(testsProjectDir) && Directory.Exists(Path.GetFullPath(_config.TestsProjectPath)))
-        {
-            testsProjectDir = Path.GetFullPath(_config.TestsProjectPath);
-        }
-        return Path.Combine(testsProjectDir, "StepDefinitions");
+        return Path.Combine(_config.ResolveTestsProjectRoot(), "StepDefinitions");
     }
 
     private static string ExtractCodeFence(string text, string lang)

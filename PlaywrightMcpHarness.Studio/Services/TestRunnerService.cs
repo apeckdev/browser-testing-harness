@@ -22,9 +22,9 @@ public class TestRunnerService : ITestRunnerService
 {
     private readonly HarnessConfig _config;
     private readonly ILogger<TestRunnerService> _logger;
-    private bool _isRunning;
+    private int _isRunningFlag;
 
-    public bool IsRunning => _isRunning;
+    public bool IsRunning => Volatile.Read(ref _isRunningFlag) == 1;
 
     public TestRunnerService(IOptions<HarnessConfig> configOptions, ILogger<TestRunnerService> logger)
     {
@@ -39,23 +39,18 @@ public class TestRunnerService : ITestRunnerService
 
     public async Task<int> RunTestsAsync(TestRunOptions options, Action<string> onOutputLine, CancellationToken cancellationToken = default)
     {
-        if (_isRunning)
+        if (Interlocked.CompareExchange(ref _isRunningFlag, 1, 0) != 0)
         {
             onOutputLine("[Runner] A test run is already in progress.");
             return -1;
         }
 
-        _isRunning = true;
         try
         {
             var userDotnet = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), ".dotnet", "dotnet.exe");
             var dotnetExe = File.Exists(userDotnet) ? userDotnet : "dotnet";
 
-            var testsProjectDir = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, _config.TestsProjectPath));
-            if (!Directory.Exists(testsProjectDir) && Directory.Exists(Path.GetFullPath(_config.TestsProjectPath)))
-            {
-                testsProjectDir = Path.GetFullPath(_config.TestsProjectPath);
-            }
+            var testsProjectDir = _config.ResolveTestsProjectRoot();
 
             var csprojFile = Path.Combine(testsProjectDir, "PlaywrightMcpHarness.Tests.csproj");
             var targetPath = File.Exists(csprojFile) ? csprojFile : testsProjectDir;
@@ -207,12 +202,8 @@ public class TestRunnerService : ITestRunnerService
                 {
                     if (!process.HasExited)
                     {
-                        onOutputLine("[Runner] Cancellation requested. Terminating test process...");
+                        onOutputLine("[Runner] Cancellation requested. Terminating test process tree...");
                         process.Kill(entireProcessTree: true);
-                    }
-                    foreach (var p in Process.GetProcessesByName("testhost"))
-                    {
-                        try { p.Kill(); } catch { }
                     }
                 }
                 catch (Exception ex)
@@ -238,7 +229,7 @@ public class TestRunnerService : ITestRunnerService
         }
         finally
         {
-            _isRunning = false;
+            Interlocked.Exchange(ref _isRunningFlag, 0);
         }
     }
 
@@ -301,12 +292,7 @@ public class TestRunnerService : ITestRunnerService
 
     public string GetTestArtifactsPath()
     {
-        var testsProjectDir = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, _config.TestsProjectPath));
-        if (!Directory.Exists(testsProjectDir) && Directory.Exists(Path.GetFullPath(_config.TestsProjectPath)))
-        {
-            testsProjectDir = Path.GetFullPath(_config.TestsProjectPath);
-        }
-        return Path.Combine(testsProjectDir, "TestArtifacts");
+        return Path.Combine(_config.ResolveTestsProjectRoot(), "TestArtifacts");
     }
 
     public void OpenTraceViewer(string traceFileName)

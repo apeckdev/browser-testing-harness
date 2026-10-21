@@ -21,7 +21,7 @@ public class TestFileInfo
 {
     public string RelativePath { get; set; } = "";
     public string FileName { get; set; } = "";
-    public string FileType { get; set; } = ""; // "Feature" or "StepDefinition"
+    public string FileType { get; set; } = ""; // "Feature", "StepDefinition", or "PageObject"
     public string Content { get; set; } = "";
 }
 
@@ -79,12 +79,11 @@ public class McpAgentService : IMcpAgentService
         InitializeSystemPrompt();
     }
 
-    private void InitializeSystemPrompt()
+    private string BuildSystemPrompt()
     {
-        _conversationHistory.Clear();
         var stepCatalogSummary = _stepCatalog.GetCatalogSummaryForPrompt();
 
-        var systemPrompt = $@"You are a Principal .NET QA Automation Architect specializing in Playwright and SpecFlow test authoring.
+        return $@"You are a Principal .NET QA Automation Architect specializing in Playwright and SpecFlow test authoring.
 You build reliable, production-grade test suites in the PlaywrightMcpHarness.Tests project.
 
 CORE OPERATIONAL RULES:
@@ -94,22 +93,24 @@ CORE OPERATIONAL RULES:
 
 2. LOCATOR RESILIENCE & PLAYWRIGHT STRICT MODE (CRITICAL BEST PRACTICES):
    - ALWAYS prioritize user-facing semantic Playwright locators:
-     * Page.GetByRole(AriaRole.<Role>, new() {{ Name = '...' }}) for buttons, links, headings, checkboxes, etc.
-     * Page.GetByLabel('...') for form controls
-     * Page.GetByPlaceholder('...') for inputs with placeholder text
-     * Page.GetByText('...') for static labels/headings
-     * Page.GetByTestId('...') when no accessible user-facing role/label exists
-   - NEVER use brittle structural CSS selectors (e.g. 'div > ul > li:nth-child(2) > a'), unadorned bare tags ('button', 'input'), or deep XPath ('//div/form/div[2]/...').
-   - When targeting links or buttons that may appear both in header navigation and footer areas, scope them or use '.First' (e.g. GetByRole(AriaRole.Link, new() {{ Name = ... }}).First) to avoid Playwright strict mode violations.
+     * Page.GetByRole(AriaRole.<Role>, new() {{ Name = ""..."" }}) for buttons, links, headings, checkboxes, etc.
+     * Page.GetByLabel(""..."") for form controls
+     * Page.GetByPlaceholder(""..."") for inputs with placeholder text
+     * Page.GetByText(""..."") for static labels/headings
+     * Page.GetByTestId(""..."") when no accessible user-facing role/label exists
+   - NEVER use brittle structural CSS selectors (e.g. ""div > ul > li:nth-child(2) > a""), unadorned bare tags (""button"", ""input""), or deep XPath (""//div/form/div[2]/..."").
+   - When targeting links or buttons that may appear both in header navigation and footer areas, scope them or use "".First"" (e.g. GetByRole(AriaRole.Link, new() {{ Name = ... }}).First) to avoid Playwright strict mode violations.
 
 3. STEP DEFINITION REUSE (DEDUPLICATION - CRITICAL):
    - Review the indexed SpecFlow step definitions below before authoring any new C# code.
    - ALWAYS reuse existing steps in your .feature files whenever an interaction or assertion is already implemented.
-   - For example, reuse 'Given I am on the ""{{pageName}}"" page' or 'When I click the ""{{buttonName}}"" button' rather than generating duplicate C# methods.
+   - For example, reuse 'Given I am on the ""Home"" page' or 'When I click the ""Submit"" button' rather than generating duplicate C# methods.
    - Only write a new StepDefinition class or method when the test requires an interaction or assertion NOT covered by existing steps.
 
-4. INSPECT EXISTING CODE:
-   - Call the local tool 'ReadExistingTestFiles' or 'GetExistingStepCatalog' before creating new tests so you follow existing naming conventions, namespaces, and step definition patterns.
+4. INSPECT EXISTING CODE & PRESERVE SHARED STEPS:
+   - Call the local tool 'ReadExistingTestFiles' or 'GetExistingStepCatalog' before creating or updating tests so you follow existing naming conventions, namespaces, and step definition patterns.
+   - CRITICAL WHEN UPDATING EXISTING STEP FILES: Because 'SaveStepDefinitionFile' overwrites the entire file, you MUST preserve all existing step methods and all existing switch/if cases (such as page name mappings in 'HomeSteps.cs' used by other .feature files). Never delete existing cases or methods that other scenarios depend on!
+   - NEVER guess URLs when adding page mappings (e.g., do not guess 'privacy-policy.html' vs 'privacy.html'). Always verify the exact href/URL using 'ReadExistingTestFiles' or Playwright MCP browser tools ('browser_navigate' / 'browser_snapshot').
 
 5. SPECFLOW FEATURE AUTHORING:
    - Call the local tool 'SaveFeatureFile' with a descriptive file name (e.g. 'Todo.feature', 'Cart.feature') and valid Gherkin syntax:
@@ -122,11 +123,16 @@ CORE OPERATIONAL RULES:
 
 6. C# STEP DEFINITION AUTHORING (TEST FRAMEWORK IS XUNIT - NEVER NUNIT):
    - Call the local tool 'SaveStepDefinitionFile' with a matching C# filename (e.g. 'TodoSteps.cs', 'CartSteps.cs').
+   - CRITICAL - ALWAYS CALL THE SAVE TOOL (NO RAW CODE DUMPS IN CHAT): Never paste full C# or Gherkin files inside markdown code blocks (```csharp or ```gherkin) in your chat message! Always persist changes by calling 'SaveStepDefinitionFile', 'SaveFeatureFile', or 'SavePageObjectFile' directly.
    - Use 'TechTalk.SpecFlow' and 'Microsoft.Playwright'.
    - Decorate class with [Binding].
    - Constructor-inject 'IPage page'.
    - Use 'await Assertions.Expect(locator)...' for clean assertions.
    - Use async Task for all step methods.
+   - CRITICAL - SPECFLOW REGEX SYNTAX & JSON ESCAPING: SpecFlow v3.9 step attributes ([Given(...)], [When(...)], [Then(...)]) use Regular Expressions, NOT {{paramName}} route templates! Use regex capture groups such as (.*) for strings and ([0-9.]+) or (\d+) for numbers. Prefer standard C# strings with backslash-escaped quotes rather than verbatim @""...""""..."" strings so your JSON tool call arguments are never malformed:
+     * CORRECT: [Given(""I am on the \""(.*)\"" page"")]
+     * CORRECT: [Then(""I should see a link named \""(.*)\"" with URL \""(.*)\"""")]
+     * WRONG (breaks SpecFlow at runtime with XUnitPendingStepException): [Given(""I am on the \""{{pageName}}\"" page"")]
    - CRITICAL - NO NUNIT: The project uses 'xunit' and 'SpecFlow.xUnit'. DO NOT use NUnit! DO NOT import 'using NUnit.Framework;', DO NOT use 'Assert.That()', '[Test]', or any NUnit syntax! Use 'Microsoft.Playwright.Assertions.Expect(...)' or 'Xunit.Assert'. Any use of NUnit will fail compilation because NUnit is NOT installed.
    - IMPORTANT: DO NOT invent non-existent types or exceptions like 'ScenarioContext.ScenarioContextInjectionException'. Always use standard .NET exceptions such as 'System.ArgumentException' or 'System.NotSupportedException' if a switch case is unhandled.
 
@@ -150,26 +156,36 @@ CORE OPERATIONAL RULES:
    - The harness automatically checks against golden references in VisualBaselines/ and highlights pixel diffs in the Studio.
 
 {stepCatalogSummary}";
-
-        _conversationHistory.Add(new ChatMessage(ChatRole.System, systemPrompt));
     }
 
-    public Task ResetConversationAsync()
+    private void InitializeSystemPrompt()
     {
+        _conversationHistory.Clear();
+        _conversationHistory.Add(new ChatMessage(ChatRole.System, BuildSystemPrompt()));
+    }
+
+    private async Task RefreshSystemPromptInHistoryAsync()
+    {
+        await _stepCatalog.ScanStepDefinitionsAsync();
+        var latestSystemPrompt = new ChatMessage(ChatRole.System, BuildSystemPrompt());
+        if (_conversationHistory.Count > 0 && _conversationHistory[0].Role == ChatRole.System)
+        {
+            _conversationHistory[0] = latestSystemPrompt;
+        }
+        else
+        {
+            _conversationHistory.Insert(0, latestSystemPrompt);
+        }
+    }
+
+    public async Task ResetConversationAsync()
+    {
+        await _stepCatalog.ScanStepDefinitionsAsync();
         InitializeSystemPrompt();
         OnStatusUpdate?.Invoke("Agent conversation reset.");
-        return Task.CompletedTask;
     }
 
-    private string GetTestsProjectRoot()
-    {
-        var path = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, _config.TestsProjectPath));
-        if (!Directory.Exists(path) && Directory.Exists(Path.GetFullPath(_config.TestsProjectPath)))
-        {
-            path = Path.GetFullPath(_config.TestsProjectPath);
-        }
-        return path;
-    }
+    private string GetTestsProjectRoot() => _config.ResolveTestsProjectRoot();
 
     private string[] GetNormalizedMcpArguments(PlaywrightMcpConfig mcpConfig)
     {
@@ -416,16 +432,22 @@ CORE OPERATIONAL RULES:
     public async Task<string> SaveFileDirectAsync(string relativePath, string content)
     {
         var root = GetTestsProjectRoot();
-        var fullPath = Path.GetFullPath(Path.Combine(root, relativePath));
+        var fullPath = _config.ResolveSafePath(relativePath);
         var dir = Path.GetDirectoryName(fullPath);
         if (!string.IsNullOrEmpty(dir) && !Directory.Exists(dir))
         {
             Directory.CreateDirectory(dir);
         }
 
+        if (relativePath.EndsWith(".cs", StringComparison.OrdinalIgnoreCase))
+        {
+            content = SanitizeSpecFlowStepAttributes(content, Path.GetFileName(fullPath));
+        }
+
         await File.WriteAllTextAsync(fullPath, content, Encoding.UTF8);
 
-        if (relativePath.EndsWith(".feature", StringComparison.OrdinalIgnoreCase))
+        if (relativePath.EndsWith(".feature", StringComparison.OrdinalIgnoreCase) ||
+            relativePath.EndsWith(".cs", StringComparison.OrdinalIgnoreCase))
         {
             await RunDotnetBuildAsync(root);
         }
@@ -437,8 +459,14 @@ CORE OPERATIONAL RULES:
 
     public async Task<bool> DeleteTestFileAsync(string relativePath)
     {
+        if (Path.GetFileName(relativePath).Equals("VisualSteps.cs", StringComparison.OrdinalIgnoreCase))
+        {
+            OnStatusUpdate?.Invoke("Cannot delete built-in harness file VisualSteps.cs.");
+            return false;
+        }
+
         var root = GetTestsProjectRoot();
-        var fullPath = Path.GetFullPath(Path.Combine(root, relativePath));
+        var fullPath = _config.ResolveSafePath(relativePath);
         if (File.Exists(fullPath))
         {
             File.Delete(fullPath);
@@ -460,6 +488,36 @@ CORE OPERATIONAL RULES:
             return true;
         }
         return false;
+    }
+
+    private static readonly Regex SpecFlowAttributeLineRegex = new(
+        @"(\[\s*(?:Given|When|Then|StepDefinition)\s*\(\s*@?""(?:""""|\\.|[^""])*"")",
+        RegexOptions.Compiled);
+
+    private static readonly Regex NamedPlaceholderInStepRegex = new(
+        @"\{[a-zA-Z_][a-zA-Z0-9_]*\}",
+        RegexOptions.Compiled);
+
+    private string SanitizeSpecFlowStepAttributes(string csharpCode, string fileName)
+    {
+        bool modified = false;
+        var sanitized = SpecFlowAttributeLineRegex.Replace(csharpCode, match =>
+        {
+            var attrText = match.Value;
+            if (NamedPlaceholderInStepRegex.IsMatch(attrText))
+            {
+                modified = true;
+                return NamedPlaceholderInStepRegex.Replace(attrText, "(.*)");
+            }
+            return attrText;
+        });
+
+        if (modified)
+        {
+            _logger.LogInformation("Converted named {{param}} placeholders to (.*) regex capture groups in SpecFlow attributes of {FileName}", fileName);
+        }
+
+        return sanitized;
     }
 
     private async Task<string> RunDotnetBuildAsync(string projectDir)
@@ -487,13 +545,14 @@ CORE OPERATIONAL RULES:
             using var proc = Process.Start(psi);
             if (proc == null) return "Failed to start dotnet build.";
 
-            var stdout = await proc.StandardOutput.ReadToEndAsync();
-            var stderr = await proc.StandardError.ReadToEndAsync();
+            var stdoutTask = proc.StandardOutput.ReadToEndAsync();
+            var stderrTask = proc.StandardError.ReadToEndAsync();
+            await Task.WhenAll(stdoutTask, stderrTask);
             await proc.WaitForExitAsync();
 
             return proc.ExitCode == 0
                 ? "SpecFlow build succeeded (code-behind generated)."
-                : $"SpecFlow build output (code {proc.ExitCode}): {stdout} {stderr}";
+                : $"SpecFlow build output (code {proc.ExitCode}): {stdoutTask.Result} {stderrTask.Result}";
         }
         catch (Exception ex)
         {
@@ -501,14 +560,16 @@ CORE OPERATIONAL RULES:
         }
     }
 
-    private string ToolReadExistingTestFiles()
+    private string ToolReadExistingTestFiles(
+        [Description("Optional category filter: 'all', 'features', 'steps', or 'pages'. Defaults to 'all'.")] string? filter = "all")
     {
         OnStatusUpdate?.Invoke("Executing Tool: ReadExistingTestFiles...");
         var root = GetTestsProjectRoot();
         var sb = new StringBuilder();
+        var normFilter = string.IsNullOrWhiteSpace(filter) ? "all" : filter.Trim().ToLowerInvariant();
 
         var featuresDir = Path.Combine(root, "Features");
-        if (Directory.Exists(featuresDir))
+        if ((normFilter is "all" or "features" or "feature") && Directory.Exists(featuresDir))
         {
             foreach (var file in Directory.GetFiles(featuresDir, "*.feature", SearchOption.AllDirectories))
             {
@@ -520,7 +581,7 @@ CORE OPERATIONAL RULES:
         }
 
         var stepsDir = Path.Combine(root, "StepDefinitions");
-        if (Directory.Exists(stepsDir))
+        if ((normFilter is "all" or "steps" or "stepdefinitions") && Directory.Exists(stepsDir))
         {
             foreach (var file in Directory.GetFiles(stepsDir, "*.cs", SearchOption.AllDirectories))
             {
@@ -532,7 +593,7 @@ CORE OPERATIONAL RULES:
         }
 
         var pagesDir = Path.Combine(root, "Pages");
-        if (Directory.Exists(pagesDir))
+        if ((normFilter is "all" or "pages" or "pageobjects") && Directory.Exists(pagesDir))
         {
             foreach (var file in Directory.GetFiles(pagesDir, "*.cs", SearchOption.AllDirectories))
             {
@@ -547,7 +608,9 @@ CORE OPERATIONAL RULES:
         return string.IsNullOrWhiteSpace(result) ? "No existing test files found in project." : result;
     }
 
-    private async Task<string> ToolSaveFeatureFileAsync(string fileName, string gherkinContent)
+    private async Task<string> ToolSaveFeatureFileAsync(
+        [Description("The file name of the SpecFlow feature file (e.g. 'Navigation.feature').")] string fileName,
+        [Description("The complete valid Gherkin content starting with 'Feature:'.")] string gherkinContent)
     {
         OnStatusUpdate?.Invoke($"Executing Tool: SaveFeatureFile ({fileName})...");
         if (!fileName.EndsWith(".feature", StringComparison.OrdinalIgnoreCase))
@@ -576,7 +639,9 @@ CORE OPERATIONAL RULES:
         return $"Successfully wrote {safeName} into Features/ directory. Build Result: {buildReport}";
     }
 
-    private async Task<string> ToolSaveStepDefinitionFileAsync(string fileName, string csharpCode)
+    private async Task<string> ToolSaveStepDefinitionFileAsync(
+        [Description("The file name of the C# step definition file (e.g. 'NavigationSteps.cs').")] string fileName,
+        [Description("The complete C# source code for the SpecFlow [Binding] step definition class.")] string csharpCode)
     {
         OnStatusUpdate?.Invoke($"Executing Tool: SaveStepDefinitionFile ({fileName})...");
         if (!fileName.EndsWith(".cs", StringComparison.OrdinalIgnoreCase))
@@ -606,6 +671,9 @@ CORE OPERATIONAL RULES:
             _logger.LogInformation("Sanitized accidental NUnit reference from generated step definition {FileName}", safeName);
         }
 
+        // Convert any accidental {paramName} placeholders inside [Given]/[When]/[Then] attributes to (.*) regex capture groups
+        csharpCode = SanitizeSpecFlowStepAttributes(csharpCode, safeName);
+
         // Prevent duplicating built-in visual assertion steps
         if (csharpCode.Contains("appearance should match baseline", StringComparison.OrdinalIgnoreCase) && !safeName.Equals("VisualSteps.cs", StringComparison.OrdinalIgnoreCase))
         {
@@ -622,18 +690,21 @@ CORE OPERATIONAL RULES:
         var filePath = Path.Combine(stepsDir, safeName);
         await File.WriteAllTextAsync(filePath, csharpCode, Encoding.UTF8);
 
-        OnStatusUpdate?.Invoke($"Saved Step Definition: {safeName}");
+        OnStatusUpdate?.Invoke($"Saved Step Definition: {safeName}. Verifying build...");
+        var buildReport = await RunDotnetBuildAsync(root);
 
         var relPath = Path.Combine("StepDefinitions", safeName);
         OnFileSaved?.Invoke(relPath);
 
-        // Re-scan catalog asynchronously so new steps are immediately indexed
-        _ = _stepCatalog.ScanStepDefinitionsAsync(forceReload: true);
+        // Re-scan catalog so new steps are immediately indexed
+        await _stepCatalog.ScanStepDefinitionsAsync(forceReload: true);
 
-        return $"Successfully wrote {safeName} into StepDefinitions/ directory.";
+        return $"Successfully wrote {safeName} into StepDefinitions/ directory. Build Result: {buildReport}";
     }
 
-    private async Task<string> ToolSavePageObjectFileAsync(string fileName, string csharpCode)
+    private async Task<string> ToolSavePageObjectFileAsync(
+        [Description("The file name of the C# Page Object class (e.g. 'NavigationPage.cs').")] string fileName,
+        [Description("The complete C# source code for the Page Object class in namespace PlaywrightMcpHarness.Tests.Pages.")] string csharpCode)
     {
         OnStatusUpdate?.Invoke($"Executing Tool: SavePageObjectFile ({fileName})...");
         if (!fileName.EndsWith(".cs", StringComparison.OrdinalIgnoreCase))
@@ -652,17 +723,20 @@ CORE OPERATIONAL RULES:
         var filePath = Path.Combine(pagesDir, safeName);
         await File.WriteAllTextAsync(filePath, csharpCode, Encoding.UTF8);
 
-        OnStatusUpdate?.Invoke($"Saved Page Object: {safeName}");
+        OnStatusUpdate?.Invoke($"Saved Page Object: {safeName}. Verifying build...");
+        var buildReport = await RunDotnetBuildAsync(root);
 
         var relPath = Path.Combine("Pages", safeName);
         OnFileSaved?.Invoke(relPath);
 
-        return $"Successfully wrote {safeName} into Pages/ directory.";
+        return $"Successfully wrote {safeName} into Pages/ directory. Build Result: {buildReport}";
     }
 
-    private string ToolGetExistingStepCatalog()
+    private async Task<string> ToolGetExistingStepCatalogAsync(
+        [Description("Optional step type filter: 'All', 'Given', 'When', or 'Then'. Defaults to 'All'.")] string? stepType = "All")
     {
         OnStatusUpdate?.Invoke("Executing Tool: GetExistingStepCatalog...");
+        await _stepCatalog.ScanStepDefinitionsAsync();
         return _stepCatalog.GetCatalogSummaryForPrompt();
     }
 
@@ -673,6 +747,8 @@ CORE OPERATIONAL RULES:
         PlaywrightMcpConfig? playwrightMcpOverride = null,
         CancellationToken cancellationToken = default)
     {
+        await RefreshSystemPromptInHistoryAsync();
+
         var mcpConfig = playwrightMcpOverride ?? _config.PlaywrightMcp;
         await EnsureMcpClientConnectedAsync(mcpConfig, cancellationToken);
 
@@ -684,12 +760,19 @@ CORE OPERATIONAL RULES:
 
         var allTools = new List<AITool>();
 
+        var executedToolsInTurn = new List<string>();
+        var savedFilesInTurn = new List<string>();
+
         // Wrap MCP tools with status notifications
         foreach (var mcpTool in mcpTools)
         {
             allTools.Add(new ObservableAIFunction(
                 mcpTool,
-                detail => OnStatusUpdate?.Invoke($"Running MCP Tool: {detail}..."),
+                detail =>
+                {
+                    executedToolsInTurn.Add(detail);
+                    OnStatusUpdate?.Invoke($"Running MCP Tool: {detail}...");
+                },
                 name => OnStatusUpdate?.Invoke($"Completed MCP Tool: {name}. Awaiting {activeProviderName}...")));
         }
 
@@ -700,7 +783,7 @@ CORE OPERATIONAL RULES:
             "Lists and returns the contents of all .feature and *Steps.cs files in the PlaywrightMcpHarness.Tests project.");
 
         var catalogTool = AIFunctionFactory.Create(
-            ToolGetExistingStepCatalog,
+            ToolGetExistingStepCatalogAsync,
             "GetExistingStepCatalog",
             "Returns the catalog of all currently indexed SpecFlow step definitions with parameters, to help you reuse existing steps.");
 
@@ -712,32 +795,55 @@ CORE OPERATIONAL RULES:
         var saveStepTool = AIFunctionFactory.Create(
             ToolSaveStepDefinitionFileAsync,
             "SaveStepDefinitionFile",
-            "Writes/updates a *Steps.cs file in PlaywrightMcpHarness.Tests/StepDefinitions.");
+            "Writes/updates a *Steps.cs file in PlaywrightMcpHarness.Tests/StepDefinitions and verifies compilation.");
 
         var savePageObjectTool = AIFunctionFactory.Create(
             ToolSavePageObjectFileAsync,
             "SavePageObjectFile",
-            "Writes/updates a Page Object class in PlaywrightMcpHarness.Tests/Pages/.");
+            "Writes/updates a Page Object class in PlaywrightMcpHarness.Tests/Pages/ and verifies compilation.");
 
         allTools.Add(new ObservableAIFunction(
             readTool,
-            detail => OnStatusUpdate?.Invoke($"Running Local Tool: {detail}..."),
+            detail =>
+            {
+                executedToolsInTurn.Add(detail);
+                OnStatusUpdate?.Invoke($"Running Local Tool: {detail}...");
+            },
             name => OnStatusUpdate?.Invoke($"Completed Local Tool: {name}. Awaiting {activeProviderName}...")));
         allTools.Add(new ObservableAIFunction(
             catalogTool,
-            detail => OnStatusUpdate?.Invoke($"Running Local Tool: {detail}..."),
+            detail =>
+            {
+                executedToolsInTurn.Add(detail);
+                OnStatusUpdate?.Invoke($"Running Local Tool: {detail}...");
+            },
             name => OnStatusUpdate?.Invoke($"Completed Local Tool: {name}. Awaiting {activeProviderName}...")));
         allTools.Add(new ObservableAIFunction(
             saveFeatureTool,
-            detail => OnStatusUpdate?.Invoke($"Running Local Tool: {detail}..."),
+            detail =>
+            {
+                executedToolsInTurn.Add(detail);
+                savedFilesInTurn.Add(detail);
+                OnStatusUpdate?.Invoke($"Running Local Tool: {detail}...");
+            },
             name => OnStatusUpdate?.Invoke($"Completed Local Tool: {name}. Awaiting {activeProviderName}...")));
         allTools.Add(new ObservableAIFunction(
             saveStepTool,
-            detail => OnStatusUpdate?.Invoke($"Running Local Tool: {detail}..."),
+            detail =>
+            {
+                executedToolsInTurn.Add(detail);
+                savedFilesInTurn.Add(detail);
+                OnStatusUpdate?.Invoke($"Running Local Tool: {detail}...");
+            },
             name => OnStatusUpdate?.Invoke($"Completed Local Tool: {name}. Awaiting {activeProviderName}...")));
         allTools.Add(new ObservableAIFunction(
             savePageObjectTool,
-            detail => OnStatusUpdate?.Invoke($"Running Local Tool: {detail}..."),
+            detail =>
+            {
+                executedToolsInTurn.Add(detail);
+                savedFilesInTurn.Add(detail);
+                OnStatusUpdate?.Invoke($"Running Local Tool: {detail}...");
+            },
             name => OnStatusUpdate?.Invoke($"Completed Local Tool: {name}. Awaiting {activeProviderName}...")));
 
         _conversationHistory.Add(new ChatMessage(ChatRole.User, userPrompt));
@@ -753,21 +859,108 @@ CORE OPERATIONAL RULES:
 
         var fullResponseBuilder = new StringBuilder();
         var hasStartedStreaming = false;
+        const int maxMalformedRetries = 2;
+        int malformedAttempt = 0;
+        const int maxUnverifiedSaveRetries = 2;
+        int unverifiedSaveAttempt = 0;
 
         try
         {
-            await foreach (var update in chatClient.GetStreamingResponseAsync(_conversationHistory, chatOptions, cancellationToken))
+            while (true)
             {
-                var text = update.Text;
-                if (!string.IsNullOrEmpty(text))
+                var turnResponseBuilder = new StringBuilder();
+                try
                 {
-                    if (!hasStartedStreaming)
+                    await foreach (var update in chatClient.GetStreamingResponseAsync(_conversationHistory, chatOptions, cancellationToken))
                     {
-                        hasStartedStreaming = true;
-                        OnStatusUpdate?.Invoke($"Generating response from {activeProviderName}...");
+                        var text = update.Text;
+                        if (!string.IsNullOrEmpty(text))
+                        {
+                            if (!hasStartedStreaming)
+                            {
+                                hasStartedStreaming = true;
+                                OnStatusUpdate?.Invoke($"Generating response from {activeProviderName}...");
+                            }
+                            turnResponseBuilder.Append(text);
+                            fullResponseBuilder.Append(text);
+                            OnAgentMessageChunk?.Invoke(text);
+                        }
                     }
-                    fullResponseBuilder.Append(text);
-                    OnAgentMessageChunk?.Invoke(text);
+
+                    var turnText = turnResponseBuilder.ToString();
+                    bool isFixRequest = userPrompt.Contains("The automated test execution encountered a failure", StringComparison.OrdinalIgnoreCase);
+                    bool dumpedCodeBlock = turnText.Contains("```csharp", StringComparison.OrdinalIgnoreCase) ||
+                                           turnText.Contains("```gherkin", StringComparison.OrdinalIgnoreCase) ||
+                                           turnText.Contains("```feature", StringComparison.OrdinalIgnoreCase);
+                    bool claimedFileSave = turnText.Contains("has been updated", StringComparison.OrdinalIgnoreCase) ||
+                                           turnText.Contains("was modified", StringComparison.OrdinalIgnoreCase) ||
+                                           turnText.Contains("were added", StringComparison.OrdinalIgnoreCase) ||
+                                           turnText.Contains("successfully compiled", StringComparison.OrdinalIgnoreCase) ||
+                                           turnText.Contains("have been resolved", StringComparison.OrdinalIgnoreCase);
+
+                    if (savedFilesInTurn.Count == 0 &&
+                        unverifiedSaveAttempt < maxUnverifiedSaveRetries &&
+                        (isFixRequest || dumpedCodeBlock || claimedFileSave))
+                    {
+                        unverifiedSaveAttempt++;
+                        _logger.LogWarning("Agent finished turn without calling any Save* tool (attempt {Attempt}/{Max}). Forcing save tool invocation.", unverifiedSaveAttempt, maxUnverifiedSaveRetries);
+                        OnStatusUpdate?.Invoke($"Agent did not invoke Save tool. Requesting file save ({unverifiedSaveAttempt}/{maxUnverifiedSaveRetries})...");
+
+                        if (!string.IsNullOrWhiteSpace(turnText))
+                        {
+                            _conversationHistory.Add(new ChatMessage(ChatRole.Assistant, turnText));
+                        }
+
+                        var retryNotice = "\n\n*(Persisting changes to disk...)*\n\n";
+                        fullResponseBuilder.Append(retryNotice);
+                        OnAgentMessageChunk?.Invoke(retryNotice);
+
+                        _conversationHistory.Add(new ChatMessage(
+                            ChatRole.User,
+                            "[System Verification Error]: You did NOT call SaveStepDefinitionFile, SaveFeatureFile, or SavePageObjectFile during this turn! Zero files were modified on disk. Do NOT output code blocks in chat or claim files were updated without calling the save tool. Call SaveStepDefinitionFile and/or SaveFeatureFile right now with the complete file content to persist your changes to disk. Remember to use standard C# strings with backslash-escaped quotes like [Given(\"I am on the \\\"(.*)\\\" page\")] instead of verbatim @\"...\"\"...\" strings."));
+
+                        continue;
+                    }
+
+                    break;
+                }
+                catch (ArgumentOutOfRangeException ex) when (
+                    ex.Message.Contains("ChatFinishReason", StringComparison.OrdinalIgnoreCase) ||
+                    ex.Message.Contains("MALFORMED_FUNCTION_CALL", StringComparison.OrdinalIgnoreCase))
+                {
+                    malformedAttempt++;
+                    _logger.LogWarning(ex, "Provider returned non-standard/malformed function call finish reason (attempt {Attempt}/{Max}).", malformedAttempt, maxMalformedRetries);
+
+                    if (malformedAttempt <= maxMalformedRetries)
+                    {
+                        var savedSummary = savedFilesInTurn.Count > 0
+                            ? $"Files saved so far in this turn: {string.Join(", ", savedFilesInTurn)}."
+                            : "NO files have been saved to disk yet in this turn!";
+
+                        OnStatusUpdate?.Invoke($"Model emitted a malformed tool call. Retrying automatically ({malformedAttempt}/{maxMalformedRetries})...");
+
+                        var retryNotice = "\n\n*(Retrying tool call...)*\n\n";
+                        fullResponseBuilder.Append(retryNotice);
+                        OnAgentMessageChunk?.Invoke(retryNotice);
+
+                        _conversationHistory.Add(new ChatMessage(
+                            ChatRole.User,
+                            $"[System Recovery]: Your last function/tool call failed with MALFORMED_FUNCTION_CALL and WAS NOT EXECUTED. {savedSummary} You MUST call SaveStepDefinitionFile / SaveFeatureFile now to save your changes to disk. To avoid MALFORMED_FUNCTION_CALL: (1) Do NOT output markdown code blocks (```csharp) in chat, and (2) in C# step attributes, use standard C# strings with backslash-escaped quotes like [Given(\"I am on the \\\"(.*)\\\" page\")] instead of verbatim @\"...\"\"...\" strings."));
+
+                        continue;
+                    }
+
+                    if (executedToolsInTurn.Count > 0 || fullResponseBuilder.Length > 0)
+                    {
+                        var fallbackMsg = $"\n\n*(Note: The model ended with a malformed function call after executing: {string.Join(", ", executedToolsInTurn)}.)*";
+                        fullResponseBuilder.Append(fallbackMsg);
+                        OnAgentMessageChunk?.Invoke(fallbackMsg);
+                        break;
+                    }
+
+                    throw new InvalidOperationException(
+                        "The AI model generated a malformed function call (MALFORMED_FUNCTION_CALL) and could not recover after retrying. Try rephrasing your prompt or switching models.",
+                        ex);
                 }
             }
 

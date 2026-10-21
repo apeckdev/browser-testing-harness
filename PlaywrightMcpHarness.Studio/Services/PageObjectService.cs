@@ -57,6 +57,7 @@ public class PageObjectService : IPageObjectService
         }
 
         var result = new List<PageObjectInfo>();
+        var root = GetTestsProjectRoot();
         var pagesDir = GetPagesDirectory();
 
         if (!Directory.Exists(pagesDir))
@@ -72,7 +73,7 @@ public class PageObjectService : IPageObjectService
             {
                 var content = File.ReadAllText(file);
                 var fileName = Path.GetFileName(file);
-                var relPath = Path.Combine("Pages", fileName);
+                var relPath = Path.GetRelativePath(root, file);
 
                 var po = ParsePageObjectFromSource(content, fileName, relPath);
                 result.Add(po);
@@ -221,20 +222,19 @@ public class {Path.GetFileNameWithoutExtension(request.SourceStepDefinitionFile)
         string pageObjectCode,
         string refactoredStepsCode)
     {
-        var root = GetTestsProjectRoot();
-        var pagesDir = Path.Combine(root, "Pages");
+        var pagesDir = GetPagesDirectory();
         if (!Directory.Exists(pagesDir))
         {
             Directory.CreateDirectory(pagesDir);
         }
 
-        var pageObjectFullPath = Path.Combine(pagesDir, Path.GetFileName(pageObjectFileName));
+        var pageObjectFullPath = _config.ResolveSafePath(Path.GetFileName(pageObjectFileName), "Pages");
         await File.WriteAllTextAsync(pageObjectFullPath, pageObjectCode, Encoding.UTF8);
 
-        var stepsFullPath = Path.Combine(root, stepFileRelativePath);
+        var stepsFullPath = _config.ResolveSafePath(stepFileRelativePath);
         if (!File.Exists(stepsFullPath))
         {
-            var altPath = Path.Combine(root, "StepDefinitions", Path.GetFileName(stepFileRelativePath));
+            var altPath = _config.ResolveSafePath(Path.GetFileName(stepFileRelativePath), "StepDefinitions");
             if (File.Exists(altPath))
             {
                 stepsFullPath = altPath;
@@ -333,17 +333,8 @@ public class {Path.GetFileNameWithoutExtension(request.SourceStepDefinitionFile)
 
     private string GetPagesDirectory()
     {
-        var testsProjectDir = GetTestsProjectRoot();
-        return Path.Combine(testsProjectDir, "Pages");
+        return Path.Combine(GetTestsProjectRoot(), "Pages");
     }
 
-    private string GetTestsProjectRoot()
-    {
-        var testsProjectDir = Path.GetFullPath(Path.Combine(AppContext.BaseDirectory, _config.TestsProjectPath));
-        if (!Directory.Exists(testsProjectDir) && Directory.Exists(Path.GetFullPath(_config.TestsProjectPath)))
-        {
-            testsProjectDir = Path.GetFullPath(_config.TestsProjectPath);
-        }
-        return testsProjectDir;
-    }
+    private string GetTestsProjectRoot() => _config.ResolveTestsProjectRoot();
 }

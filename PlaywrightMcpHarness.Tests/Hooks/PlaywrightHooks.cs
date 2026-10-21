@@ -35,7 +35,7 @@ public class PlaywrightHooks
 
         float slowMo = 0;
         var slowMoEnv = Environment.GetEnvironmentVariable("SLOWMO");
-        if (!string.IsNullOrEmpty(slowMoEnv) && float.TryParse(slowMoEnv, out var parsedSlowMo))
+        if (!string.IsNullOrEmpty(slowMoEnv) && float.TryParse(slowMoEnv, System.Globalization.NumberStyles.Float, System.Globalization.CultureInfo.InvariantCulture, out var parsedSlowMo))
         {
             slowMo = parsedSlowMo;
         }
